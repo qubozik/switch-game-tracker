@@ -1,0 +1,2 @@
+# switch-game-tracker
+
