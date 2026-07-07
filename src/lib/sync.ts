@@ -2,11 +2,12 @@ import { db } from "@/db";
 import { games, type NewGame } from "@/db/schema";
 import { fetchRecentSwitchGames } from "@/lib/igdb";
 import { detectFormat, type FormatDetection } from "@/lib/format-detect";
-import { inArray, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 
 export type SyncResult = {
   added: number;
   skipped: number;
+  refreshed: number;
   formatsDetected: number;
   braveLookups: number;
   addedTitles: string[];
@@ -16,10 +17,12 @@ export type SyncResult = {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Pull recent/upcoming Switch & Switch 2 releases from IGDB, add the new ones,
- * and best-effort detect each one's physical format (Nintendo prior + Brave).
- * High-confidence results are applied and confirmed; medium-confidence are
- * applied but left "needs review"; everything else stays Unknown/needs review.
+ * Weekly sync:
+ *  - Discover new Switch/Switch 2 releases from IGDB and insert them, with
+ *    best-effort physical-format detection (Nintendo prior + Brave/LLM).
+ *  - Refresh existing games' IGDB critic rating + release date/status (so
+ *    score-less and upcoming titles fill in over time). Personal fields
+ *    (status, physicalFormat, etc.) are never touched by the refresh.
  */
 export async function runSync(): Promise<SyncResult> {
   const candidates = await fetchRecentSwitchGames();
@@ -29,24 +32,61 @@ export async function runSync(): Promise<SyncResult> {
 
   const existing = igdbIds.length
     ? await db
-        .select({ igdbId: games.igdbId, title: games.title })
+        .select({
+          id: games.id,
+          igdbId: games.igdbId,
+          title: games.title,
+          igdbRating: games.igdbRating,
+          releaseDate: games.releaseDate,
+          released: games.released,
+        })
         .from(games)
         .where(
           sql`${inArray(games.igdbId, igdbIds)} OR ${inArray(games.title, titles)}`,
         )
     : [];
 
-  const existingIgdb = new Set(
-    existing.map((e) => e.igdbId).filter((x): x is number => x != null),
-  );
-  const existingTitles = new Set(existing.map((e) => e.title.toLowerCase()));
+  type ExistingRow = (typeof existing)[number];
+  const byIgdb = new Map<number, ExistingRow>();
+  const byTitle = new Map<string, ExistingRow>();
+  for (const e of existing) {
+    if (e.igdbId != null) byIgdb.set(e.igdbId, e);
+    byTitle.set(e.title.toLowerCase(), e);
+  }
 
-  const newGames = candidates.filter(
-    (c) =>
-      !existingIgdb.has(c.igdbId) &&
-      !existingTitles.has(c.title.toLowerCase()),
-  );
+  // Partition candidates into refresh-existing vs. insert-new.
+  const newGames: typeof candidates = [];
+  const updates: { id: number; data: Record<string, unknown> }[] = [];
+  for (const c of candidates) {
+    const match = byIgdb.get(c.igdbId) ?? byTitle.get(c.title.toLowerCase());
+    if (!match) {
+      newGames.push(c);
+      continue;
+    }
+    const data: Record<string, unknown> = {};
+    if (c.igdbRating != null && c.igdbRating !== match.igdbRating) {
+      data.igdbRating = c.igdbRating;
+    }
+    if (c.releaseDate && c.releaseDate !== match.releaseDate) {
+      data.releaseDate = c.releaseDate;
+    }
+    if (c.released !== match.released) {
+      data.released = c.released;
+    }
+    if (Object.keys(data).length) updates.push({ id: match.id, data });
+  }
 
+  // Apply refreshes.
+  let refreshed = 0;
+  for (const u of updates) {
+    await db
+      .update(games)
+      .set({ ...u.data, lastUpdated: sql`now()` })
+      .where(eq(games.id, u.id));
+    refreshed++;
+  }
+
+  // Detect formats + insert new games.
   const hasBrave = !!process.env.BRAVE_API_KEY;
   const maxLookups = Number(process.env.SYNC_MAX_FORMAT_LOOKUPS ?? 15);
   let braveLookups = 0;
@@ -81,6 +121,7 @@ export async function runSync(): Promise<SyncResult> {
       genre: c.genre,
       coverImageUrl: c.coverImageUrl,
       description: c.description,
+      igdbRating: c.igdbRating,
       physicalFormat: applied ? det.format : "Unknown",
       formatSource: applied ? det.source : null,
       needsReview: !(applied && det.confidence === "high"),
@@ -103,6 +144,7 @@ export async function runSync(): Promise<SyncResult> {
   return {
     added,
     skipped: candidates.length - added,
+    refreshed,
     formatsDetected,
     braveLookups,
     addedTitles,

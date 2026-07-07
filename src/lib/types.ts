@@ -20,6 +20,7 @@ export interface Game {
   formatSource: string | null;
   metacriticScore: number | null;
   opencriticScore: number | null;
+  igdbRating: number | null;
   coverImageUrl: string | null;
   howLongToBeatHours: number | null;
   isMultiplayer: boolean;

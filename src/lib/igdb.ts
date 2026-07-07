@@ -84,6 +84,8 @@ export type IgdbGame = {
   genres?: { name: string }[];
   cover?: { image_id: string };
   platforms?: number[];
+  aggregated_rating?: number;
+  aggregated_rating_count?: number;
   involved_companies?: { company?: { name?: string }; publisher?: boolean }[];
 };
 
@@ -110,6 +112,7 @@ export async function fetchRecentSwitchGames(opts?: {
     coverImageUrl: string | null;
     description: string | null;
     publisher: string | null;
+    igdbRating: number | null;
   }[]
 > {
   const sinceDays = opts?.sinceDays ?? 120;
@@ -125,7 +128,7 @@ export async function fetchRecentSwitchGames(opts?: {
 
   const rows = await igdb<IgdbGame[]>(
     "games",
-    `fields id,name,first_release_date,summary,genres.name,cover.image_id,platforms,involved_companies.company.name,involved_companies.publisher;
+    `fields id,name,first_release_date,summary,genres.name,cover.image_id,platforms,aggregated_rating,aggregated_rating_count,involved_companies.company.name,involved_companies.publisher;
      where platforms = ${platformList}
        & first_release_date >= ${from}
        & first_release_date <= ${to}
@@ -158,6 +161,8 @@ export async function fetchRecentSwitchGames(opts?: {
       coverImageUrl: coverUrl(r.cover?.image_id),
       description: r.summary ?? null,
       publisher,
+      igdbRating:
+        r.aggregated_rating != null ? Math.round(r.aggregated_rating) : null,
     };
   });
 }

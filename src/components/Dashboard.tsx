@@ -112,7 +112,11 @@ export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
     list.sort((a, b) => {
       if (sortBy === "title") return dir * a.title.localeCompare(b.title);
       if (sortBy === "score")
-        return dir * ((a.opencriticScore ?? -1) - (b.opencriticScore ?? -1));
+        return (
+          dir *
+          ((a.opencriticScore ?? a.metacriticScore ?? a.igdbRating ?? -1) -
+            (b.opencriticScore ?? b.metacriticScore ?? b.igdbRating ?? -1))
+        );
       // release
       const ad = a.releaseDate ?? "";
       const bd = b.releaseDate ?? "";
@@ -383,6 +387,14 @@ function GameCard({
                 className="text-[10px] font-bold rounded px-1.5 py-0.5 bg-zinc-800 text-zinc-200"
               >
                 OC {g.opencriticScore}
+              </span>
+            )}
+            {g.igdbRating != null && (
+              <span
+                title="IGDB critic rating"
+                className="text-[10px] font-bold rounded px-1.5 py-0.5 bg-zinc-800 text-zinc-200"
+              >
+                IGDB {g.igdbRating}
               </span>
             )}
           </div>

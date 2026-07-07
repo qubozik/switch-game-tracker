@@ -30,6 +30,7 @@ export const games = pgTable("games", {
   formatSource: text("format_source"),
   metacriticScore: integer("metacritic_score"),
   opencriticScore: integer("opencritic_score"),
+  igdbRating: integer("igdb_rating"),
   coverImageUrl: text("cover_image_url"),
   howLongToBeatHours: doublePrecision("how_long_to_beat_hours"),
   isMultiplayer: boolean("is_multiplayer").default(false).notNull(),

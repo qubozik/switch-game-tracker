@@ -25,6 +25,7 @@ export default async function Home() {
     formatSource: r.formatSource,
     metacriticScore: r.metacriticScore,
     opencriticScore: r.opencriticScore,
+    igdbRating: r.igdbRating,
     coverImageUrl: r.coverImageUrl,
     howLongToBeatHours: r.howLongToBeatHours,
     isMultiplayer: r.isMultiplayer,
