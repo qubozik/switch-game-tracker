@@ -153,22 +153,6 @@ export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
               </p>
             </div>
           </div>
-          <div className="flex rounded-md border border-zinc-800 overflow-hidden">
-            <button
-              onClick={() => setView("grid")}
-              className={`px-3 py-1.5 text-sm ${view === "grid" ? "bg-zinc-700 text-white" : "bg-zinc-900 text-zinc-400 hover:text-zinc-200"}`}
-              title="Grid view"
-            >
-              Grid
-            </button>
-            <button
-              onClick={() => setView("table")}
-              className={`px-3 py-1.5 text-sm ${view === "table" ? "bg-zinc-700 text-white" : "bg-zinc-900 text-zinc-400 hover:text-zinc-200"}`}
-              title="Table view"
-            >
-              Table
-            </button>
-          </div>
         </div>
       </header>
 
@@ -209,15 +193,22 @@ export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
           >
             {sortDir === "asc" ? "↑" : "↓"}
           </button>
-          <label className="flex items-center gap-2 text-sm text-zinc-300 ml-1">
-            <input
-              type="checkbox"
-              checked={onlyReview}
-              onChange={(e) => setOnlyReview(e.target.checked)}
-              className="accent-amber-500"
-            />
-            Needs review
-          </label>
+          <div className="flex rounded-md border border-zinc-800 overflow-hidden">
+            <button
+              onClick={() => setView("grid")}
+              className={`px-3 py-2 text-sm ${view === "grid" ? "bg-zinc-700 text-white" : "bg-zinc-900 text-zinc-400 hover:text-zinc-200"}`}
+              title="Grid view"
+            >
+              Grid
+            </button>
+            <button
+              onClick={() => setView("table")}
+              className={`px-3 py-2 text-sm ${view === "table" ? "bg-zinc-700 text-white" : "bg-zinc-900 text-zinc-400 hover:text-zinc-200"}`}
+              title="Table view"
+            >
+              Table
+            </button>
+          </div>
         </div>
 
         <div className="flex items-center justify-between mb-3">
