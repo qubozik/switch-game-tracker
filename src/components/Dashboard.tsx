@@ -24,6 +24,7 @@ export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
   const [sortBy, setSortBy] = useState<SortKey>("release");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [view, setView] = useState<"grid" | "table">("grid");
 
   async function patch(id: number, body: Record<string, unknown>) {
     setBusyId(id);
@@ -201,24 +202,69 @@ export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
             />
             Needs review
           </label>
+          <div className="ml-auto flex rounded-md border border-zinc-800 overflow-hidden">
+            <button
+              onClick={() => setView("grid")}
+              className={`px-3 py-2 text-sm ${view === "grid" ? "bg-zinc-700 text-white" : "bg-zinc-900 text-zinc-400 hover:text-zinc-200"}`}
+              title="Grid view"
+            >
+              Grid
+            </button>
+            <button
+              onClick={() => setView("table")}
+              className={`px-3 py-2 text-sm ${view === "table" ? "bg-zinc-700 text-white" : "bg-zinc-900 text-zinc-400 hover:text-zinc-200"}`}
+              title="Table view"
+            >
+              Table
+            </button>
+          </div>
         </div>
 
         <p className="text-xs text-zinc-500 mb-3">
           Showing {filtered.length} of {games.length}
         </p>
 
-        {/* Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-          {filtered.map((g) => (
-            <GameCard
-              key={g.id}
-              game={g}
-              busy={busyId === g.id}
-              onStatus={toggleStatus}
-              onFormat={setFormatFor}
-            />
-          ))}
-        </div>
+        {/* Grid / Table */}
+        {view === "grid" ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+            {filtered.map((g) => (
+              <GameCard
+                key={g.id}
+                game={g}
+                busy={busyId === g.id}
+                onStatus={toggleStatus}
+                onFormat={setFormatFor}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-zinc-800">
+            <table className="w-full text-sm min-w-[720px]">
+              <thead className="bg-zinc-900/60 text-zinc-400 text-xs">
+                <tr>
+                  <th className="text-left font-medium px-3 py-2 w-10"></th>
+                  <th className="text-left font-medium px-3 py-2">Title</th>
+                  <th className="text-left font-medium px-3 py-2">Platform</th>
+                  <th className="text-left font-medium px-3 py-2">Format</th>
+                  <th className="text-left font-medium px-3 py-2">Release</th>
+                  <th className="text-left font-medium px-3 py-2">Score</th>
+                  <th className="text-left font-medium px-3 py-2">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((g) => (
+                  <GameRow
+                    key={g.id}
+                    game={g}
+                    busy={busyId === g.id}
+                    onStatus={toggleStatus}
+                    onFormat={setFormatFor}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {filtered.length === 0 && (
           <div className="text-center text-zinc-500 py-20">No games found.</div>
@@ -322,6 +368,91 @@ function FormatSourceBadge({ game: g }: { game: Game }) {
     );
   }
   return null;
+}
+
+function GameRow({
+  game: g,
+  busy,
+  onStatus,
+  onFormat,
+}: {
+  game: Game;
+  busy: boolean;
+  onStatus: (g: Game, s: GameStatus) => void;
+  onFormat: (g: Game, v: string) => void;
+}) {
+  const score = g.opencriticScore ?? g.metacriticScore ?? g.igdbRating;
+  return (
+    <tr className="border-t border-zinc-800 hover:bg-zinc-900/40">
+      <td className="px-3 py-2">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        {g.coverImageUrl ? (
+          <img
+            src={g.coverImageUrl}
+            alt=""
+            loading="lazy"
+            className="h-10 w-8 object-cover rounded"
+          />
+        ) : (
+          <div className="h-10 w-8 rounded bg-zinc-800" />
+        )}
+      </td>
+      <td className="px-3 py-2">
+        <div className="font-medium">{g.title}</div>
+        {g.needsReview && (
+          <span className="text-[10px] text-amber-400">needs review</span>
+        )}
+      </td>
+      <td className="px-3 py-2 text-zinc-300 whitespace-nowrap">{g.platform}</td>
+      <td className="px-3 py-2">
+        <div className="flex items-center gap-2">
+          <select
+            disabled={busy}
+            value={g.physicalFormat}
+            onChange={(e) => onFormat(g, e.target.value)}
+            className="rounded bg-zinc-950 border border-zinc-700 px-1.5 py-1 text-xs outline-none focus:border-zinc-500"
+          >
+            {PHYSICAL_FORMATS.map((f) => (
+              <option key={f} value={f}>
+                {f}
+              </option>
+            ))}
+          </select>
+          <FormatSourceBadge game={g} />
+        </div>
+      </td>
+      <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">
+        {g.releaseDate ?? "—"}
+      </td>
+      <td className="px-3 py-2 text-zinc-300">{score != null ? score : "—"}</td>
+      <td className="px-3 py-2">
+        <div className="flex gap-1">
+          <button
+            disabled={busy}
+            onClick={() => onStatus(g, "owned")}
+            className={`rounded px-2 py-1 text-xs border ${
+              g.status === "owned"
+                ? "bg-emerald-500 text-black border-emerald-500"
+                : "border-zinc-700 text-zinc-300 hover:border-emerald-500/60"
+            }`}
+          >
+            Owned
+          </button>
+          <button
+            disabled={busy}
+            onClick={() => onStatus(g, "wanted")}
+            className={`rounded px-2 py-1 text-xs border ${
+              g.status === "wanted"
+                ? "bg-pink-500 text-black border-pink-500"
+                : "border-zinc-700 text-zinc-300 hover:border-pink-500/60"
+            }`}
+          >
+            Wanted
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
 }
 
 function GameCard({
