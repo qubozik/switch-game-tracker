@@ -1,6 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "echo 'no dependencies to install'",
-  "buildCommand": "echo 'static site, no build step'",
-  "outputDirectory": "."
+  "crons": [
+    {
+      "path": "/api/sync",
+      "schedule": "0 5 * * 0"
+    }
+  ]
 }
