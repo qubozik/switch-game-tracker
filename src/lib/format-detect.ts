@@ -177,7 +177,11 @@ async function classifyWithLLM(
     };
     const content = data.choices?.[0]?.message?.content;
     if (!content) return null;
-    const parsed = JSON.parse(content) as {
+    // Tolerate models that wrap JSON in prose or code fences.
+    let jsonText = content.trim();
+    const match = jsonText.match(/\{[\s\S]*\}/);
+    if (match) jsonText = match[0];
+    const parsed = JSON.parse(jsonText) as {
       format?: string;
       confidence?: string;
     };

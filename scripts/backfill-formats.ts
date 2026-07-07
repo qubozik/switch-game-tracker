@@ -38,9 +38,9 @@ async function main() {
   const targets = await db
     .select({ id: games.id, title: games.title, igdbId: games.igdbId })
     .from(games)
-    .where(eq(games.physicalFormat, "Unknown"));
+    .where(eq(games.needsReview, true));
 
-  console.log(`Detecting formats for ${targets.length} Unknown games...`);
+  console.log(`Detecting formats for ${targets.length} unconfirmed games...`);
   let applied = 0;
   const counts: Record<string, number> = {};
   for (const g of targets) {

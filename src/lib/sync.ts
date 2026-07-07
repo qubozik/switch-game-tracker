@@ -48,7 +48,7 @@ export async function runSync(): Promise<SyncResult> {
   );
 
   const hasBrave = !!process.env.BRAVE_API_KEY;
-  const maxLookups = Number(process.env.SYNC_MAX_FORMAT_LOOKUPS ?? 40);
+  const maxLookups = Number(process.env.SYNC_MAX_FORMAT_LOOKUPS ?? 15);
   let braveLookups = 0;
   let formatsDetected = 0;
 
