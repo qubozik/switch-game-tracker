@@ -39,6 +39,7 @@ export async function runSync(): Promise<SyncResult> {
           igdbRating: games.igdbRating,
           releaseDate: games.releaseDate,
           released: games.released,
+          coverImageUrl: games.coverImageUrl,
         })
         .from(games)
         .where(
@@ -72,6 +73,10 @@ export async function runSync(): Promise<SyncResult> {
     }
     if (c.released !== match.released) {
       data.released = c.released;
+    }
+    // Fill in a missing cover, but never overwrite one we already have.
+    if (!match.coverImageUrl && c.coverImageUrl) {
+      data.coverImageUrl = c.coverImageUrl;
     }
     if (Object.keys(data).length) updates.push({ id: match.id, data });
   }
