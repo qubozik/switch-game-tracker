@@ -24,7 +24,7 @@ export type Confidence = "high" | "medium" | "low";
 export interface FormatDetection {
   format: PhysicalFormat;
   confidence: Confidence;
-  source: "nintendo" | "brave" | "none";
+  source: "nintendo" | "brave" | "llm" | "none";
 }
 
 const KC = String.raw`game[\s-]*key[\s-]*card`;
@@ -108,6 +108,92 @@ function classify(results: BraveResult[]): FormatDetection {
   return { format: "Unknown", confidence: "low", source: "none" };
 }
 
+const VALID_FORMATS = new Set<PhysicalFormat>([
+  "Full Cart",
+  "Key Card",
+  "Digital Only",
+  "Unknown",
+]);
+
+/**
+ * Use an LLM to read the Brave snippets and classify the format. Works with any
+ * OpenAI-compatible chat API. Configure with:
+ *   LLM_API_KEY   (required to enable)
+ *   LLM_BASE_URL  (default https://api.openai.com/v1)
+ *   LLM_MODEL     (default gpt-4o-mini)
+ */
+async function classifyWithLLM(
+  title: string,
+  results: BraveResult[],
+): Promise<FormatDetection | null> {
+  const key = process.env.LLM_API_KEY;
+  if (!key) return null;
+  const base = (process.env.LLM_BASE_URL || "https://api.openai.com/v1").replace(
+    /\/$/,
+    "",
+  );
+  const model = process.env.LLM_MODEL || "gpt-4o-mini";
+
+  const snippets = results
+    .slice(0, 8)
+    .map(
+      (r, i) =>
+        `${i + 1}. ${(r.title ?? "").trim()} — ${(r.description ?? "").replace(/<[^>]+>/g, "").trim()}`,
+    )
+    .join("\n");
+  if (!snippets.trim()) return null;
+
+  const system =
+    "You classify the PHYSICAL release format of a Nintendo Switch / Switch 2 game from web-search snippets. " +
+    "Definitions: " +
+    '"Full Cart" = the entire game is on the physical cartridge/game card; ' +
+    '"Key Card" = a Nintendo Switch 2 Game-Key Card (the cartridge is only a key and the game must be downloaded); ' +
+    '"Digital Only" = no physical release, or a physical box that only contains a download code; ' +
+    '"Unknown" = the snippets do not clearly say. ' +
+    'Respond ONLY with strict JSON: {"format":"Full Cart|Key Card|Digital Only|Unknown","confidence":"high|medium|low"}. ' +
+    "Use high only when snippets explicitly state the format for THIS game.";
+  const user = `Game: ${title}\n\nSearch results:\n${snippets}`;
+
+  try {
+    const res = await fetch(`${base}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+      }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      choices?: { message?: { content?: string } }[];
+    };
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) return null;
+    const parsed = JSON.parse(content) as {
+      format?: string;
+      confidence?: string;
+    };
+    const format = (parsed.format ?? "Unknown") as PhysicalFormat;
+    if (!VALID_FORMATS.has(format)) return null;
+    const confidence = (["high", "medium", "low"].includes(
+      parsed.confidence ?? "",
+    )
+      ? parsed.confidence
+      : "medium") as Confidence;
+    return { format, confidence, source: "llm" };
+  } catch {
+    return null;
+  }
+}
+
 export async function detectFormat(opts: {
   title: string;
   publisher?: string | null;
@@ -116,7 +202,7 @@ export async function detectFormat(opts: {
   if (opts.publisher && /nintendo/i.test(opts.publisher)) {
     return { format: "Full Cart", confidence: "high", source: "nintendo" };
   }
-  // 2. Brave web search.
+  // 2. Brave web search for retrieval.
   const key = process.env.BRAVE_API_KEY;
   if (!key) return { format: "Unknown", confidence: "low", source: "none" };
   try {
@@ -124,6 +210,9 @@ export async function detectFormat(opts: {
       `is "${opts.title}" a game-key card Nintendo Switch 2`,
       key,
     );
+    // 3. Prefer the LLM snippet-reader when configured; else regex heuristic.
+    const llm = await classifyWithLLM(opts.title, results);
+    if (llm) return llm;
     return classify(results);
   } catch {
     return { format: "Unknown", confidence: "low", source: "none" };

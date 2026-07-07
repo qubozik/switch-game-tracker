@@ -246,6 +246,42 @@ function Select({
   );
 }
 
+function FormatSourceBadge({ game: g }: { game: Game }) {
+  if (g.physicalFormat === "Unknown") return null;
+  const src = g.formatSource;
+  if (src === "manual") {
+    return (
+      <span
+        title="You confirmed this format"
+        className="text-[10px] rounded px-1.5 py-0.5 bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+      >
+        ✓ confirmed
+      </span>
+    );
+  }
+  if (src === "brave" || src === "nintendo" || src === "llm") {
+    if (g.needsReview) {
+      return (
+        <span
+          title={`Auto-detected (${src}) — please verify`}
+          className="text-[10px] rounded px-1.5 py-0.5 bg-amber-500/15 text-amber-300 border border-amber-500/30"
+        >
+          auto?
+        </span>
+      );
+    }
+    return (
+      <span
+        title={`Auto-detected (${src})`}
+        className="text-[10px] rounded px-1.5 py-0.5 bg-zinc-700/40 text-zinc-300 border border-zinc-600"
+      >
+        auto
+      </span>
+    );
+  }
+  return null;
+}
+
 function GameCard({
   game: g,
   busy,
@@ -312,6 +348,7 @@ function GameCard({
           >
             {g.physicalFormat}
           </span>
+          <FormatSourceBadge game={g} />
           {g.releaseDate && (
             <span className="text-[10px] rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-400">
               {g.releaseDate}
