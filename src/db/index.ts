@@ -11,13 +11,25 @@ const globalForDb = globalThis as unknown as {
 };
 
 function getConnectionString(): string {
-  const cs = process.env.POSTGRES_URL || process.env.DATABASE_URL || "";
-  if (!cs) {
-    throw new Error(
-      "Database connection string is not set. Set POSTGRES_URL (Vercel Postgres) or DATABASE_URL.",
-    );
-  }
-  return cs;
+  // Direct, standard names first.
+  const direct = process.env.POSTGRES_URL || process.env.DATABASE_URL;
+  if (direct) return direct;
+
+  // Fall back to any prefixed variant created by the Vercel Neon integration,
+  // e.g. SGT_POSTGRES_URL / SGT_DATABASE_URL. Prefer a pooled POSTGRES_URL.
+  const keys = Object.keys(process.env);
+  const pooled = keys.find(
+    (k) => /(^|_)POSTGRES_URL$/.test(k) && process.env[k],
+  );
+  if (pooled) return process.env[pooled] as string;
+  const dbUrl = keys.find(
+    (k) => /(^|_)DATABASE_URL$/.test(k) && process.env[k],
+  );
+  if (dbUrl) return process.env[dbUrl] as string;
+
+  throw new Error(
+    "Database connection string is not set. Set POSTGRES_URL / DATABASE_URL (or a *_POSTGRES_URL / *_DATABASE_URL from the Neon integration).",
+  );
 }
 
 function getDb() {
