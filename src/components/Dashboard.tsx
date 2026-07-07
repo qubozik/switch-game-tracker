@@ -305,14 +305,12 @@ function GameCard({
           <span className="text-[10px] rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-300">
             {g.platform}
           </span>
-          <span className="text-[10px] rounded border px-1.5 py-0.5">
-            <span
-              className={`rounded border px-1.5 py-0.5 ${
-                FORMAT_STYLES[g.physicalFormat] ?? FORMAT_STYLES.Unknown
-              }`}
-            >
-              {g.physicalFormat}
-            </span>
+          <span
+            className={`text-[10px] rounded border px-1.5 py-0.5 ${
+              FORMAT_STYLES[g.physicalFormat] ?? FORMAT_STYLES.Unknown
+            }`}
+          >
+            {g.physicalFormat}
           </span>
           {g.releaseDate && (
             <span className="text-[10px] rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-400">
