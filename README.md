@@ -25,7 +25,7 @@ up‑to‑date automatically every week.
   that act as one‑click filters.
 - **Grid and Table views.**
 - **Hide** games you'll never want (excluded by default, with a "Show hidden" toggle).
-- **Manually add any game** (including Switch 1 titles) by pasting its IGDB link.
+- **Manually add any game** (including Switch 1 titles) via built-in IGDB search.
 - **Password protection** for the whole site and API (single shared password).
 
 ---
@@ -89,7 +89,8 @@ Key columns:
 |---|---|---|
 | `/api/games` | GET | List all games |
 | `/api/games/:id` | PATCH | Update `status`, `physicalFormat`, `needsReview`, or `hidden` |
-| `/api/games/add` | POST | Add a game by IGDB link/slug (`{ "url": "https://www.igdb.com/games/<slug>" }`); runs format detection |
+| `/api/games/add` | POST | Add a game by IGDB id or link (`{ "igdbId": 1234 }` or `{ "url": "..." }`); runs format detection |
+| `/api/igdb/search` | GET | Search IGDB for Switch/Switch 2 games (`?q=`) for the Add picker |
 | `/api/sync` | GET/POST | Run the weekly sync (guarded by `CRON_SECRET`) |
 
 ---
@@ -151,10 +152,11 @@ npm run dev
 
 - **Automatically:** the weekly sync discovers new **Switch 2 / cross-gen** releases
   above a popularity threshold.
-- **Manually:** click **"+ Add game"**, paste a game's **IGDB link** (from
-  [igdb.com](https://www.igdb.com)), and it's fetched and added with cover art,
-  score, release info, and best-effort format detection. This is how you add
-  specific **Switch 1** titles without importing the whole Switch 1 catalog.
+- **Manually:** click **"+ Add game"** and **search IGDB right in the app** — type
+  a title, then click **Add** on the result you want. It's fetched and added with
+  cover art, score, release info, and best-effort format detection. This is how you
+  add specific **Switch 1** titles without importing the whole Switch 1 catalog.
+  (Pasting an IGDB link still works too.)
 
 ## Notes & caveats
 
