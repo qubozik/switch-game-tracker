@@ -40,6 +40,7 @@ export async function runSync(): Promise<SyncResult> {
           releaseDate: games.releaseDate,
           released: games.released,
           coverImageUrl: games.coverImageUrl,
+          igdbUrl: games.igdbUrl,
         })
         .from(games)
         .where(
@@ -77,6 +78,9 @@ export async function runSync(): Promise<SyncResult> {
     // Fill in a missing cover, but never overwrite one we already have.
     if (!match.coverImageUrl && c.coverImageUrl) {
       data.coverImageUrl = c.coverImageUrl;
+    }
+    if (!match.igdbUrl && c.igdbUrl) {
+      data.igdbUrl = c.igdbUrl;
     }
     if (Object.keys(data).length) updates.push({ id: match.id, data });
   }
@@ -125,6 +129,7 @@ export async function runSync(): Promise<SyncResult> {
       platform: c.platform,
       genre: c.genre,
       coverImageUrl: c.coverImageUrl,
+      igdbUrl: c.igdbUrl,
       description: c.description,
       igdbRating: c.igdbRating,
       physicalFormat: applied ? det.format : "Unknown",

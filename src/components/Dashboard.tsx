@@ -402,12 +402,23 @@ function GameRow({
       <td className="px-3 py-2">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         {g.coverImageUrl ? (
-          <img
-            src={g.coverImageUrl}
-            alt=""
-            loading="lazy"
-            className="h-10 w-8 object-cover rounded"
-          />
+          g.igdbUrl ? (
+            <a href={g.igdbUrl} target="_blank" rel="noopener noreferrer" title="View on IGDB">
+              <img
+                src={g.coverImageUrl}
+                alt=""
+                loading="lazy"
+                className="h-10 w-8 object-cover rounded"
+              />
+            </a>
+          ) : (
+            <img
+              src={g.coverImageUrl}
+              alt=""
+              loading="lazy"
+              className="h-10 w-8 object-cover rounded"
+            />
+          )
         ) : (
           <div className="h-10 w-8 rounded bg-zinc-800" />
         )}
@@ -496,12 +507,29 @@ function GameCard({
       <div className="relative aspect-[3/4] bg-zinc-800">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         {g.coverImageUrl ? (
-          <img
-            src={g.coverImageUrl}
-            alt={g.title}
-            loading="lazy"
-            className="h-full w-full object-cover"
-          />
+          g.igdbUrl ? (
+            <a
+              href={g.igdbUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block h-full w-full"
+              title="View on IGDB"
+            >
+              <img
+                src={g.coverImageUrl}
+                alt={g.title}
+                loading="lazy"
+                className="h-full w-full object-cover"
+              />
+            </a>
+          ) : (
+            <img
+              src={g.coverImageUrl}
+              alt={g.title}
+              loading="lazy"
+              className="h-full w-full object-cover"
+            />
+          )
         ) : (
           <div className="h-full w-full grid place-items-center text-zinc-600 text-sm">
             No cover

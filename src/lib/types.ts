@@ -22,6 +22,7 @@ export interface Game {
   opencriticScore: number | null;
   igdbRating: number | null;
   coverImageUrl: string | null;
+  igdbUrl: string | null;
   howLongToBeatHours: number | null;
   isMultiplayer: boolean;
   isLocalCoop: boolean;

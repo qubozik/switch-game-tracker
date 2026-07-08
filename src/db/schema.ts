@@ -18,6 +18,7 @@ import {
 export const games = pgTable("games", {
   id: serial("id").primaryKey(),
   igdbId: integer("igdb_id").unique(),
+  igdbUrl: text("igdb_url"),
 
   title: text("title").notNull().unique(),
   releaseDate: date("release_date"),
