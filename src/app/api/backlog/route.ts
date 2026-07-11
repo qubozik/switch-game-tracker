@@ -5,7 +5,7 @@ import { and, eq, isNotNull, sql } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
-type Action = "add" | "remove" | "up" | "down" | "complete" | "uncomplete";
+type Action = "add" | "remove" | "up" | "down" | "complete" | "uncomplete" | "reorder";
 const ACTIONS = new Set<Action>([
   "add",
   "remove",
@@ -13,10 +13,11 @@ const ACTIONS = new Set<Action>([
   "down",
   "complete",
   "uncomplete",
+  "reorder",
 ]);
 
 export async function POST(req: NextRequest) {
-  let body: { id?: unknown; action?: unknown };
+  let body: { id?: unknown; action?: unknown; ids?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -24,6 +25,27 @@ export async function POST(req: NextRequest) {
   }
   const id = Number(body.id);
   const action = body.action as Action;
+
+  // Reorder: body.ids is the new ordered list of backlog game ids.
+  if (action === "reorder" && Array.isArray(body.ids)) {
+    const ids = (body.ids as unknown[])
+      .map((x) => Number(x))
+      .filter((n) => Number.isInteger(n));
+    for (let i = 0; i < ids.length; i++) {
+      await db
+        .update(games)
+        .set({ backlogOrder: i + 1, lastUpdated: sql`now()` })
+        .where(eq(games.id, ids[i]));
+    }
+    const rows = ids.length
+      ? await db
+          .select()
+          .from(games)
+          .where(sql`${games.id} in (${sql.join(ids, sql`, `)})`)
+      : [];
+    return NextResponse.json({ games: rows });
+  }
+
   if (!Number.isInteger(id) || !ACTIONS.has(action)) {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }

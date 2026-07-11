@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type DragEvent } from "react";
 import type { Game, GameStatus } from "@/lib/types";
 import { PHYSICAL_FORMATS } from "@/lib/types";
 
@@ -131,6 +131,34 @@ export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
     } catch (e) {
       console.error(e);
       alert("Failed to update backlog.");
+    }
+  }
+
+  async function reorderBacklog(ids: number[]) {
+    setGames((prev) =>
+      prev.map((g) => {
+        const idx = ids.indexOf(g.id);
+        return idx === -1 ? g : ({ ...g, backlogOrder: idx + 1 } as Game);
+      }),
+    );
+    try {
+      const res = await fetch("/api/backlog", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reorder", ids }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      const updated: Game[] = data.games ?? [];
+      setGames((prev) =>
+        prev.map((g) => {
+          const u = updated.find((x) => x.id === g.id);
+          return u ? ({ ...g, ...u } as Game) : g;
+        }),
+      );
+    } catch (e) {
+      console.error(e);
+      alert("Failed to reorder backlog.");
     }
   }
 
@@ -384,6 +412,7 @@ export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
             active={backlogActive}
             done={backlogDone}
             onAction={backlogAction}
+            onReorder={reorderBacklog}
           />
         ) : (
           <>
@@ -932,6 +961,7 @@ function Planner({
   active,
   done,
   onAction,
+  onReorder,
 }: {
   active: Game[];
   done: Game[];
@@ -939,7 +969,11 @@ function Planner({
     id: number,
     action: "add" | "remove" | "up" | "down" | "complete" | "uncomplete",
   ) => void;
+  onReorder: (ids: number[]) => void;
 }) {
+  const [dragId, setDragId] = useState<number | null>(null);
+  const [overId, setOverId] = useState<number | null>(null);
+
   const total = active.length + done.length;
   if (total === 0) {
     return (
@@ -948,6 +982,21 @@ function Planner({
       </div>
     );
   }
+
+  function drop() {
+    if (dragId != null && overId != null && dragId !== overId) {
+      const ids = active.map((g) => g.id);
+      const from = ids.indexOf(dragId);
+      const to = ids.indexOf(overId);
+      if (from !== -1 && to !== -1) {
+        ids.splice(to, 0, ids.splice(from, 1)[0]);
+        onReorder(ids);
+      }
+    }
+    setDragId(null);
+    setOverId(null);
+  }
+
   return (
     <div className="max-w-3xl">
       <div className="flex items-center justify-between mb-4">
@@ -956,16 +1005,39 @@ function Planner({
           {done.length} of {total} completed
         </span>
       </div>
-      <div className="h-2 rounded-full bg-zinc-800 mb-6 overflow-hidden">
+      <div className="h-2 rounded-full bg-zinc-800 mb-4 overflow-hidden">
         <div
           className="h-full bg-emerald-500"
           style={{ width: `${total ? (done.length / total) * 100 : 0}%` }}
         />
       </div>
+      <p className="text-xs text-zinc-500 mb-3">
+        Drag rows to reorder, or use the arrows.
+      </p>
 
       <ul className="flex flex-col gap-2">
         {active.map((g, i) => (
-          <PlannerRow key={g.id} game={g} index={i + 1} count={active.length} onAction={onAction} />
+          <PlannerRow
+            key={g.id}
+            game={g}
+            index={i + 1}
+            count={active.length}
+            onAction={onAction}
+            drag={{
+              dragging: dragId === g.id,
+              over: overId === g.id && dragId !== g.id,
+              onDragStart: () => setDragId(g.id),
+              onDragOver: (e) => {
+                e.preventDefault();
+                setOverId(g.id);
+              },
+              onDrop: drop,
+              onDragEnd: () => {
+                setDragId(null);
+                setOverId(null);
+              },
+            }}
+          />
         ))}
       </ul>
 
@@ -989,6 +1061,7 @@ function PlannerRow({
   count,
   onAction,
   completedRow = false,
+  drag,
 }: {
   game: Game;
   index?: number;
@@ -998,9 +1071,31 @@ function PlannerRow({
     action: "add" | "remove" | "up" | "down" | "complete" | "uncomplete",
   ) => void;
   completedRow?: boolean;
+  drag?: {
+    dragging: boolean;
+    over: boolean;
+    onDragStart: () => void;
+    onDragOver: (e: DragEvent) => void;
+    onDrop: () => void;
+    onDragEnd: () => void;
+  };
 }) {
   return (
-    <li className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900/50 p-2">
+    <li
+      draggable={!!drag}
+      onDragStart={drag?.onDragStart}
+      onDragOver={drag?.onDragOver}
+      onDrop={drag?.onDrop}
+      onDragEnd={drag?.onDragEnd}
+      className={`flex items-center gap-3 rounded-lg border bg-zinc-900/50 p-2 ${
+        drag?.over ? "border-red-500" : "border-zinc-800"
+      } ${drag?.dragging ? "opacity-50" : ""}`}
+    >
+      {drag && (
+        <span className="cursor-grab text-zinc-600 select-none px-1" title="Drag to reorder">
+          ⠿
+        </span>
+      )}
       {!completedRow && (
         <div className="flex flex-col">
           <button
