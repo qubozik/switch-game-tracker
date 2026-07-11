@@ -4,10 +4,11 @@ import {
   getOwnedGames,
   getWishlistAppIds,
   getAppDetails,
+  getPrices,
   steamCapsule,
   steamStoreUrl,
 } from "@/lib/steam";
-import { isNotNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 
 export type SteamSyncResult = {
   ownedSynced: number;
@@ -111,6 +112,13 @@ export async function runSteamSync(opts?: {
     wishlistAdded = inserted.length;
   }
 
+  // Best-effort price refresh for wishlist items.
+  try {
+    await runSteamPriceSync();
+  } catch {
+    // ignore
+  }
+
   return {
     ownedSynced: ownedRows.length,
     wishlistFound: wishlist.length,
@@ -118,4 +126,49 @@ export async function runSteamSync(opts?: {
     wishlistPending: Math.max(0, newWishlist.length - toProcess.length),
     ranAt: new Date().toISOString(),
   };
+}
+
+export type PriceSyncResult = {
+  updated: number;
+  onSale: number;
+  ranAt: string;
+};
+
+/** Refresh current prices for Steam wishlist (wanted) items. */
+export async function runSteamPriceSync(): Promise<PriceSyncResult> {
+  const rows = await db
+    .select({ id: games.id, steamAppId: games.steamAppId })
+    .from(games)
+    .where(
+      and(
+        eq(games.library, "steam"),
+        eq(games.status, "wanted"),
+        isNotNull(games.steamAppId),
+      ),
+    );
+  const appIds = rows
+    .map((r) => r.steamAppId)
+    .filter((x): x is number => x != null);
+  if (!appIds.length)
+    return { updated: 0, onSale: 0, ranAt: new Date().toISOString() };
+
+  const prices = await getPrices(appIds);
+  let updated = 0;
+  let onSale = 0;
+  for (const r of rows) {
+    const pr = r.steamAppId != null ? prices.get(r.steamAppId) : undefined;
+    if (!pr) continue;
+    await db
+      .update(games)
+      .set({
+        steamPriceCents: pr.finalCents,
+        steamInitialCents: pr.initialCents,
+        steamDiscountPct: pr.discountPct,
+        priceUpdatedAt: sql`now()`,
+      })
+      .where(eq(games.id, r.id));
+    updated++;
+    if (pr.discountPct > 0) onSale++;
+  }
+  return { updated, onSale, ranAt: new Date().toISOString() };
 }

@@ -37,6 +37,9 @@ export interface Game {
   status: GameStatus;
   hidden: boolean;
   playtimeMinutes: number | null;
+  steamPriceCents: number | null;
+  steamInitialCents: number | null;
+  steamDiscountPct: number | null;
   backlogOrder: number | null;
   completed: boolean;
   needsReview: boolean;

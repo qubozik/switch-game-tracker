@@ -713,6 +713,35 @@ function FormatSourceBadge({ game: g }: { game: Game }) {
   return null;
 }
 
+function PriceTag({ game: g }: { game: Game }) {
+  if (g.library !== "steam" || g.steamPriceCents == null) return null;
+  if (g.steamPriceCents === 0) {
+    return (
+      <span className="text-[10px] rounded px-1.5 py-0.5 bg-zinc-700/40 text-zinc-300 border border-zinc-600">
+        Free
+      </span>
+    );
+  }
+  const fmt = (c: number) => `$${(c / 100).toFixed(2)}`;
+  const onSale = (g.steamDiscountPct ?? 0) > 0;
+  return (
+    <span
+      className={`text-[10px] rounded px-1.5 py-0.5 border font-semibold ${
+        onSale
+          ? "bg-green-600/20 text-green-300 border-green-600/40"
+          : "bg-zinc-800 text-zinc-200 border-zinc-700"
+      }`}
+      title={onSale ? "On sale" : "Current Steam price"}
+    >
+      {onSale && <span className="mr-1">-{g.steamDiscountPct}%</span>}
+      {onSale && g.steamInitialCents != null && (
+        <span className="line-through text-zinc-500 mr-1">{fmt(g.steamInitialCents)}</span>
+      )}
+      {fmt(g.steamPriceCents)}
+    </span>
+  );
+}
+
 function BacklogButton({
   game: g,
   onBacklog,
@@ -807,6 +836,7 @@ function GameCard({
             </span>
           )}
           <FormatSourceBadge game={g} />
+          <PriceTag game={g} />
           {playtime && (
             <span className="text-[10px] rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-400">{playtime}</span>
           )}
@@ -902,7 +932,11 @@ function GameRow({
       <td className="px-3 py-2 text-zinc-300 whitespace-nowrap">{g.platform}</td>
       <td className="px-3 py-2">
         {isSteam ? (
-          <span className="text-xs text-zinc-500">Digital</span>
+          g.steamPriceCents != null ? (
+            <PriceTag game={g} />
+          ) : (
+            <span className="text-xs text-zinc-500">Digital</span>
+          )
         ) : (
           <div className="flex items-center gap-2">
             <select

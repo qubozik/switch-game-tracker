@@ -7,6 +7,10 @@
     {
       "path": "/api/sync",
       "schedule": "0 10 * * 0"
+    },
+    {
+      "path": "/api/steam/prices",
+      "schedule": "0 15 * * *"
     }
   ]
 }

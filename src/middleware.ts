@@ -4,7 +4,7 @@ export const config = {
   // Protect everything EXCEPT:
   //  - /api/sync   (the weekly cron; it's guarded by CRON_SECRET instead)
   //  - Next.js internals and static assets
-  matcher: ["/((?!api/sync|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!api/sync|api/steam/prices|_next/static|_next/image|favicon.ico).*)"],
 };
 
 export function middleware(req: NextRequest) {

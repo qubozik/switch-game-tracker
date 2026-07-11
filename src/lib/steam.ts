@@ -121,3 +121,53 @@ export async function searchSteam(query: string): Promise<SteamSearchResult[]> {
     coverUrl: steamCapsule(i.id),
   }));
 }
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+export type SteamPrice = {
+  finalCents: number | null;
+  initialCents: number | null;
+  discountPct: number;
+};
+
+/** Batched current prices (price_overview) for a list of appids. */
+export async function getPrices(
+  appIds: number[],
+): Promise<Map<number, SteamPrice>> {
+  const out = new Map<number, SteamPrice>();
+  for (let i = 0; i < appIds.length; i += 50) {
+    const chunk = appIds.slice(i, i + 50);
+    try {
+      const res = await fetch(
+        `${STORE}/api/appdetails?appids=${chunk.join(",")}&filters=price_overview&cc=us&l=en`,
+      );
+      if (res.ok) {
+        const json = (await res.json()) as Record<
+          string,
+          {
+            success: boolean;
+            data?: {
+              price_overview?: {
+                final?: number;
+                initial?: number;
+                discount_percent?: number;
+              };
+            };
+          }
+        >;
+        for (const [k, v] of Object.entries(json)) {
+          const po = v?.success ? v.data?.price_overview : undefined;
+          out.set(Number(k), {
+            finalCents: po?.final ?? null,
+            initialCents: po?.initial ?? null,
+            discountPct: po?.discount_percent ?? 0,
+          });
+        }
+      }
+    } catch {
+      // skip this batch
+    }
+    await sleep(400);
+  }
+  return out;
+}

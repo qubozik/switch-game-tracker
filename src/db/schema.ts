@@ -58,6 +58,12 @@ export const games = pgTable("games", {
   hidden: boolean("hidden").default(false).notNull(),
   playtimeMinutes: integer("playtime_minutes"),
 
+  // Steam pricing (refreshed daily for wishlist items)
+  steamPriceCents: integer("steam_price_cents"),
+  steamInitialCents: integer("steam_initial_cents"),
+  steamDiscountPct: integer("steam_discount_pct"),
+  priceUpdatedAt: timestamp("price_updated_at", { withTimezone: true }),
+
   // Backlog completion planner
   backlogOrder: integer("backlog_order"), // null = not in backlog
   completed: boolean("completed").default(false).notNull(),
