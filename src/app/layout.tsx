@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Switch Game Tracker",
+  title: "Game Tracker",
   description:
-    "Track which Nintendo Switch games you own and want, and whether each physical release is a full cart, key card, or code in box.",
+    "Track your Nintendo Switch and Steam games — owned, wanted, cart type, and a backlog completion planner.",
 };
 
 export default function RootLayout({

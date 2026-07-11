@@ -12,18 +12,37 @@ const FORMAT_STYLES: Record<string, string> = {
 };
 
 type SortKey = "release" | "title" | "score";
+type Tab = "All" | "Switch" | "Switch 2" | "Steam" | "Planner";
+const TABS: Tab[] = ["All", "Switch", "Switch 2", "Steam", "Planner"];
+type AddSource = "nintendo" | "steam";
 
-type IgdbResult = {
-  igdbId: number;
+type AddResult = {
+  key: number;
   name: string;
-  year: number | null;
+  sub: string;
   coverUrl: string | null;
-  platform: string;
-  igdbUrl: string | null;
+  payload: { igdbId?: number; steamAppId?: number };
 };
+
+function matchesTab(g: Game, tab: Tab): boolean {
+  if (tab === "All" || tab === "Planner") return true;
+  if (tab === "Steam") return g.library === "steam";
+  if (tab === "Switch")
+    return g.library === "nintendo" && (g.platform === "Switch" || g.platform === "Both");
+  if (tab === "Switch 2")
+    return g.library === "nintendo" && (g.platform === "Switch 2" || g.platform === "Both");
+  return true;
+}
+
+function playtimeLabel(mins: number | null): string | null {
+  if (mins == null || mins <= 0) return null;
+  const h = mins / 60;
+  return h < 1 ? `${mins}m played` : `${h.toFixed(h < 10 ? 1 : 0)}h played`;
+}
 
 export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
   const [games, setGames] = useState<Game[]>(initialGames);
+  const [tab, setTab] = useState<Tab>("All");
   const [search, setSearch] = useState("");
   const [platform, setPlatform] = useState("All");
   const [format, setFormat] = useState("All");
@@ -35,20 +54,22 @@ export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [view, setView] = useState<"grid" | "table">("grid");
   const [showHidden, setShowHidden] = useState(false);
+
   const [addOpen, setAddOpen] = useState(false);
+  const [addSource, setAddSource] = useState<AddSource>("nintendo");
   const [addQuery, setAddQuery] = useState("");
-  const [addResults, setAddResults] = useState<IgdbResult[]>([]);
+  const [addResults, setAddResults] = useState<AddResult[]>([]);
   const [addSearching, setAddSearching] = useState(false);
-  const [addingId, setAddingId] = useState<number | null>(null);
-  const [addedIds, setAddedIds] = useState<Set<number>>(new Set());
+  const [addingKey, setAddingKey] = useState<number | null>(null);
+  const [addedKeys, setAddedKeys] = useState<Set<number>>(new Set());
   const [addError, setAddError] = useState<string | null>(null);
+
+  const [steamSyncing, setSteamSyncing] = useState(false);
+  const [steamMsg, setSteamMsg] = useState<string | null>(null);
 
   async function patch(id: number, body: Record<string, unknown>) {
     setBusyId(id);
-    // optimistic update
-    setGames((prev) =>
-      prev.map((g) => (g.id === id ? ({ ...g, ...body } as Game) : g)),
-    );
+    setGames((prev) => prev.map((g) => (g.id === id ? ({ ...g, ...body } as Game) : g)));
     try {
       const res = await fetch(`/api/games/${id}`, {
         method: "PATCH",
@@ -69,16 +90,43 @@ export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
   function toggleStatus(g: Game, next: GameStatus) {
     patch(g.id, { status: g.status === next ? null : next });
   }
-
   function toggleHidden(g: Game) {
     patch(g.id, { hidden: !g.hidden });
   }
+  function setFormatFor(g: Game, value: string) {
+    patch(g.id, { physicalFormat: value, needsReview: false });
+  }
+
+  async function backlogAction(
+    id: number,
+    action: "add" | "remove" | "up" | "down" | "complete" | "uncomplete",
+  ) {
+    try {
+      const res = await fetch("/api/backlog", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, action }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Backlog update failed");
+      const updated: Game[] = data.games ?? [];
+      setGames((prev) =>
+        prev.map((g) => {
+          const u = updated.find((x) => x.id === g.id);
+          return u ? ({ ...g, ...u } as Game) : g;
+        }),
+      );
+    } catch (e) {
+      console.error(e);
+      alert("Failed to update backlog.");
+    }
+  }
 
   async function addGame(
-    payload: { igdbId?: number; url?: string },
-    resultId?: number,
+    payload: { igdbId?: number; steamAppId?: number; url?: string },
+    resultKey?: number,
   ) {
-    if (resultId != null) setAddingId(resultId);
+    if (resultKey != null) setAddingKey(resultKey);
     setAddError(null);
     try {
       const res = await fetch("/api/games/add", {
@@ -89,24 +137,46 @@ export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to add game");
       setGames((prev) => [data.game as Game, ...prev]);
-      if (resultId != null) {
-        setAddedIds((prev) => new Set(prev).add(resultId));
-      } else {
-        setAddQuery("");
-        setAddOpen(false);
-      }
+      if (resultKey != null) setAddedKeys((prev) => new Set(prev).add(resultKey));
+      else setAddOpen(false);
     } catch (e) {
       setAddError(e instanceof Error ? e.message : String(e));
     } finally {
-      setAddingId(null);
+      setAddingKey(null);
     }
   }
 
-  // Debounced IGDB search while the Add modal is open.
+  async function syncSteam() {
+    setSteamSyncing(true);
+    setSteamMsg(null);
+    try {
+      const res = await fetch("/api/steam/sync", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "Sync failed");
+      const g = await fetch("/api/games");
+      const gd = await g.json();
+      if (gd.games) setGames(gd.games as Game[]);
+      setSteamMsg(
+        `Synced ${data.ownedSynced} owned, +${data.wishlistAdded} wishlist` +
+          (data.wishlistPending ? ` (${data.wishlistPending} more pending — run again)` : ""),
+      );
+    } catch (e) {
+      setSteamMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSteamSyncing(false);
+    }
+  }
+
+  // Debounced Add search (Nintendo IGDB or Steam).
   useEffect(() => {
     if (!addOpen) return;
     const q = addQuery.trim();
-    if (q.length < 2 || /igdb\.com\/games\//i.test(q)) {
+    if (addSource === "nintendo" && /igdb\.com\/games\//i.test(q)) {
+      setAddResults([]);
+      setAddSearching(false);
+      return;
+    }
+    if (q.length < 2) {
       setAddResults([]);
       setAddSearching(false);
       return;
@@ -114,9 +184,41 @@ export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
     setAddSearching(true);
     const t = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/igdb/search?q=${encodeURIComponent(q)}`);
-        const data = await res.json();
-        setAddResults(res.ok ? (data.results ?? []) : []);
+        if (addSource === "steam") {
+          const res = await fetch(`/api/steam/search?q=${encodeURIComponent(q)}`);
+          const data = await res.json();
+          setAddResults(
+            (data.results ?? []).map(
+              (r: { steamAppId: number; name: string; coverUrl: string | null }) => ({
+                key: r.steamAppId,
+                name: r.name,
+                sub: "Steam",
+                coverUrl: r.coverUrl,
+                payload: { steamAppId: r.steamAppId },
+              }),
+            ),
+          );
+        } else {
+          const res = await fetch(`/api/igdb/search?q=${encodeURIComponent(q)}`);
+          const data = await res.json();
+          setAddResults(
+            (data.results ?? []).map(
+              (r: {
+                igdbId: number;
+                name: string;
+                year: number | null;
+                coverUrl: string | null;
+                platform: string;
+              }) => ({
+                key: r.igdbId,
+                name: r.name,
+                sub: `${r.year ?? "TBA"} · ${r.platform}`,
+                coverUrl: r.coverUrl,
+                payload: { igdbId: r.igdbId },
+              }),
+            ),
+          );
+        }
       } catch {
         setAddResults([]);
       } finally {
@@ -124,14 +226,12 @@ export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
       }
     }, 350);
     return () => clearTimeout(t);
-  }, [addQuery, addOpen]);
+  }, [addQuery, addOpen, addSource]);
 
-  function setFormatFor(g: Game, value: string) {
-    patch(g.id, { physicalFormat: value, needsReview: false });
-  }
+  const tabbed = useMemo(() => games.filter((g) => matchesTab(g, tab)), [games, tab]);
 
   const stats = useMemo(() => {
-    const visible = games.filter((g) => !g.hidden);
+    const visible = tabbed.filter((g) => !g.hidden);
     return {
       total: visible.length,
       owned: visible.filter((g) => g.status === "owned").length,
@@ -139,12 +239,13 @@ export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
       released: visible.filter((g) => g.released).length,
       upcoming: visible.filter((g) => !g.released).length,
       review: visible.filter((g) => g.needsReview).length,
-      hidden: games.filter((g) => g.hidden).length,
+      hidden: tabbed.filter((g) => g.hidden).length,
     };
-  }, [games]);
+  }, [tabbed]);
 
-  function selectStat(kind: "total" | "owned" | "wanted" | "released" | "upcoming" | "review") {
-    // reset everything, then apply the chosen filter
+  function selectStat(
+    kind: "total" | "owned" | "wanted" | "released" | "upcoming" | "review",
+  ) {
     setSearch("");
     setPlatform("All");
     setFormat("All");
@@ -167,7 +268,7 @@ export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
     !onlyReview;
 
   const filtered = useMemo(() => {
-    let list = games.filter((g) => (showHidden ? g.hidden : !g.hidden));
+    let list = tabbed.filter((g) => (showHidden ? g.hidden : !g.hidden));
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter((g) => g.title.toLowerCase().includes(q));
@@ -193,24 +294,28 @@ export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
           ((a.opencriticScore ?? a.metacriticScore ?? a.igdbRating ?? -1) -
             (b.opencriticScore ?? b.metacriticScore ?? b.igdbRating ?? -1))
         );
-      // release
       const ad = a.releaseDate ?? "";
       const bd = b.releaseDate ?? "";
       return dir * ad.localeCompare(bd);
     });
     return list;
-  }, [
-    games,
-    search,
-    platform,
-    format,
-    status,
-    released,
-    onlyReview,
-    showHidden,
-    sortBy,
-    sortDir,
-  ]);
+  }, [tabbed, search, platform, format, status, released, onlyReview, showHidden, sortBy, sortDir]);
+
+  // Backlog (across all libraries, ignores the active tab)
+  const backlogActive = useMemo(
+    () =>
+      games
+        .filter((g) => g.backlogOrder != null && !g.completed)
+        .sort((a, b) => (a.backlogOrder ?? 0) - (b.backlogOrder ?? 0)),
+    [games],
+  );
+  const backlogDone = useMemo(
+    () =>
+      games
+        .filter((g) => g.backlogOrder != null && g.completed)
+        .sort((a, b) => (a.backlogOrder ?? 0) - (b.backlogOrder ?? 0)),
+    [games],
+  );
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -221,11 +326,9 @@ export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
               N
             </div>
             <div>
-              <h1 className="text-lg font-bold leading-tight">
-                Switch Game Tracker
-              </h1>
+              <h1 className="text-lg font-bold leading-tight">Game Tracker</h1>
               <p className="text-xs text-zinc-400">
-                Own it, want it, and know the cart type.
+                Own it, want it, plan your backlog.
               </p>
             </div>
           </div>
@@ -234,7 +337,8 @@ export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
               setAddError(null);
               setAddQuery("");
               setAddResults([]);
-              setAddedIds(new Set());
+              setAddedKeys(new Set());
+              setAddSource(tab === "Steam" ? "steam" : "nintendo");
               setAddOpen(true);
             }}
             className="rounded-md bg-red-600 hover:bg-red-500 text-white text-sm font-semibold px-3 py-2"
@@ -242,125 +346,148 @@ export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
             + Add game
           </button>
         </div>
+        {/* Tabs */}
+        <div className="mx-auto max-w-7xl px-4 flex gap-1 overflow-x-auto">
+          {TABS.map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap ${
+                tab === t
+                  ? "border-red-500 text-white"
+                  : "border-transparent text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              {t === "Planner"
+                ? `Planner${backlogActive.length ? ` (${backlogActive.length})` : ""}`
+                : t}
+            </button>
+          ))}
+        </div>
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6">
-        {/* Stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
-          <Stat label="Total" value={stats.total} onClick={() => selectStat("total")} active={noFilters} />
-          <Stat label="Owned" value={stats.owned} accent="text-emerald-400" onClick={() => selectStat("owned")} active={status === "owned"} />
-          <Stat label="Wanted" value={stats.wanted} accent="text-pink-400" onClick={() => selectStat("wanted")} active={status === "wanted"} />
-          <Stat label="Released" value={stats.released} onClick={() => selectStat("released")} active={released === "Released"} />
-          <Stat label="Upcoming" value={stats.upcoming} onClick={() => selectStat("upcoming")} active={released === "Upcoming"} />
-          <Stat
-            label="Needs review"
-            value={stats.review}
-            accent="text-amber-400"
-            onClick={() => selectStat("review")}
-            active={onlyReview}
+        {tab === "Planner" ? (
+          <Planner
+            active={backlogActive}
+            done={backlogDone}
+            onAction={backlogAction}
           />
-        </div>
-
-        {/* Filters */}
-        <div className="flex flex-wrap items-center gap-2 mb-5">
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search games..."
-            className="flex-1 min-w-[180px] rounded-md bg-zinc-900 border border-zinc-800 px-3 py-2 text-sm outline-none focus:border-zinc-600"
-          />
-          <Select value={platform} onChange={setPlatform} label="Platform" options={["All", "Switch 2", "Both", "Switch"]} />
-          <Select value={format} onChange={setFormat} label="Format" options={["All", ...PHYSICAL_FORMATS]} />
-          <Select value={status} onChange={setStatus} label="Status" options={[["All","All"],["owned","Owned"],["wanted","Wanted"],["untracked","Untracked"]]} />
-          <Select value={released} onChange={setReleased} label="Availability" options={["All", "Released", "Upcoming"]} />
-          <Select value={sortBy} onChange={(v) => setSortBy(v as SortKey)} label="Sort" options={[["release","Release date"],["title","Title"],["score","Score"]]} />
-          <button
-            onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
-            className="rounded-md bg-zinc-900 border border-zinc-800 px-3 py-2 text-sm hover:border-zinc-600"
-            title="Toggle sort direction"
-          >
-            {sortDir === "asc" ? "↑" : "↓"}
-          </button>
-          <div className="flex rounded-md border border-zinc-800 overflow-hidden">
-            <button
-              onClick={() => setView("grid")}
-              className={`px-3 py-2 text-sm ${view === "grid" ? "bg-zinc-700 text-white" : "bg-zinc-900 text-zinc-400 hover:text-zinc-200"}`}
-              title="Grid view"
-            >
-              Grid
-            </button>
-            <button
-              onClick={() => setView("table")}
-              className={`px-3 py-2 text-sm ${view === "table" ? "bg-zinc-700 text-white" : "bg-zinc-900 text-zinc-400 hover:text-zinc-200"}`}
-              title="Table view"
-            >
-              Table
-            </button>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-xs text-zinc-500">
-            Showing {filtered.length}
-            {showHidden ? " hidden" : ""} of{" "}
-            {showHidden ? stats.hidden : stats.total}
-          </p>
-          {(stats.hidden > 0 || showHidden) && (
-            <button
-              onClick={() => setShowHidden((v) => !v)}
-              className="text-xs text-zinc-400 hover:text-zinc-200 underline underline-offset-2"
-            >
-              {showHidden ? "← Back to library" : `Show hidden (${stats.hidden})`}
-            </button>
-          )}
-        </div>
-
-        {/* Grid / Table */}
-        {view === "grid" ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-            {filtered.map((g) => (
-              <GameCard
-                key={g.id}
-                game={g}
-                busy={busyId === g.id}
-                onStatus={toggleStatus}
-                onFormat={setFormatFor}
-                onHide={toggleHidden}
-              />
-            ))}
-          </div>
         ) : (
-          <div className="overflow-x-auto rounded-lg border border-zinc-800">
-            <table className="w-full text-sm min-w-[720px]">
-              <thead className="bg-zinc-900/60 text-zinc-400 text-xs">
-                <tr>
-                  <th className="text-left font-medium px-3 py-2 w-10"></th>
-                  <th className="text-left font-medium px-3 py-2">Title</th>
-                  <th className="text-left font-medium px-3 py-2">Platform</th>
-                  <th className="text-left font-medium px-3 py-2">Format</th>
-                  <th className="text-left font-medium px-3 py-2">Release</th>
-                  <th className="text-left font-medium px-3 py-2">Score</th>
-                  <th className="text-left font-medium px-3 py-2">Status</th>
-                </tr>
-              </thead>
-              <tbody>
+          <>
+            {/* Stats */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+              <Stat label="Total" value={stats.total} onClick={() => selectStat("total")} active={noFilters} />
+              <Stat label="Owned" value={stats.owned} accent="text-emerald-400" onClick={() => selectStat("owned")} active={status === "owned"} />
+              <Stat label="Wanted" value={stats.wanted} accent="text-pink-400" onClick={() => selectStat("wanted")} active={status === "wanted"} />
+              <Stat label="Released" value={stats.released} onClick={() => selectStat("released")} active={released === "Released"} />
+              <Stat label="Upcoming" value={stats.upcoming} onClick={() => selectStat("upcoming")} active={released === "Upcoming"} />
+              <Stat label="Needs review" value={stats.review} accent="text-amber-400" onClick={() => selectStat("review")} active={onlyReview} />
+            </div>
+
+            {/* Filters */}
+            <div className="flex flex-wrap items-center gap-2 mb-5">
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search games..."
+                className="flex-1 min-w-[180px] rounded-md bg-zinc-900 border border-zinc-800 px-3 py-2 text-sm outline-none focus:border-zinc-600"
+              />
+              <Select value={format} onChange={setFormat} label="Format" options={["All", ...PHYSICAL_FORMATS]} />
+              <Select value={status} onChange={setStatus} label="Status" options={[["All", "All"], ["owned", "Owned"], ["wanted", "Wanted"], ["untracked", "Untracked"]]} />
+              <Select value={released} onChange={setReleased} label="Availability" options={["All", "Released", "Upcoming"]} />
+              <Select value={sortBy} onChange={(v) => setSortBy(v as SortKey)} label="Sort" options={[["release", "Release date"], ["title", "Title"], ["score", "Score"]]} />
+              <button
+                onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+                className="rounded-md bg-zinc-900 border border-zinc-800 px-3 py-2 text-sm hover:border-zinc-600"
+                title="Toggle sort direction"
+              >
+                {sortDir === "asc" ? "↑" : "↓"}
+              </button>
+              <div className="flex rounded-md border border-zinc-800 overflow-hidden">
+                <button onClick={() => setView("grid")} className={`px-3 py-2 text-sm ${view === "grid" ? "bg-zinc-700 text-white" : "bg-zinc-900 text-zinc-400 hover:text-zinc-200"}`}>Grid</button>
+                <button onClick={() => setView("table")} className={`px-3 py-2 text-sm ${view === "table" ? "bg-zinc-700 text-white" : "bg-zinc-900 text-zinc-400 hover:text-zinc-200"}`}>Table</button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+              <p className="text-xs text-zinc-500">
+                Showing {filtered.length}
+                {showHidden ? " hidden" : ""} of {showHidden ? stats.hidden : stats.total}
+              </p>
+              <div className="flex items-center gap-3">
+                {tab === "Steam" && (
+                  <>
+                    {steamMsg && <span className="text-xs text-zinc-400">{steamMsg}</span>}
+                    <button
+                      onClick={syncSteam}
+                      disabled={steamSyncing}
+                      className="text-xs rounded-md border border-zinc-700 px-2.5 py-1 hover:border-zinc-500 disabled:opacity-50"
+                    >
+                      {steamSyncing ? "Syncing Steam…" : "Sync Steam"}
+                    </button>
+                  </>
+                )}
+                {(stats.hidden > 0 || showHidden) && (
+                  <button
+                    onClick={() => setShowHidden((v) => !v)}
+                    className="text-xs text-zinc-400 hover:text-zinc-200 underline underline-offset-2"
+                  >
+                    {showHidden ? "← Back to library" : `Show hidden (${stats.hidden})`}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {view === "grid" ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
                 {filtered.map((g) => (
-                  <GameRow
+                  <GameCard
                     key={g.id}
                     game={g}
                     busy={busyId === g.id}
                     onStatus={toggleStatus}
                     onFormat={setFormatFor}
                     onHide={toggleHidden}
+                    onBacklog={backlogAction}
                   />
                 ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-lg border border-zinc-800">
+                <table className="w-full text-sm min-w-[760px]">
+                  <thead className="bg-zinc-900/60 text-zinc-400 text-xs">
+                    <tr>
+                      <th className="text-left font-medium px-3 py-2 w-10"></th>
+                      <th className="text-left font-medium px-3 py-2">Title</th>
+                      <th className="text-left font-medium px-3 py-2">Platform</th>
+                      <th className="text-left font-medium px-3 py-2">Format</th>
+                      <th className="text-left font-medium px-3 py-2">Release</th>
+                      <th className="text-left font-medium px-3 py-2">Score</th>
+                      <th className="text-left font-medium px-3 py-2">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((g) => (
+                      <GameRow
+                        key={g.id}
+                        game={g}
+                        busy={busyId === g.id}
+                        onStatus={toggleStatus}
+                        onFormat={setFormatFor}
+                        onHide={toggleHidden}
+                        onBacklog={backlogAction}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
-        {filtered.length === 0 && (
-          <div className="text-center text-zinc-500 py-20">No games found.</div>
+            {filtered.length === 0 && (
+              <div className="text-center text-zinc-500 py-20">No games found.</div>
+            )}
+          </>
         )}
       </main>
 
@@ -375,31 +502,42 @@ export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
           >
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-bold">Add a game</h2>
+              <button onClick={() => setAddOpen(false)} className="text-zinc-400 hover:text-zinc-200" aria-label="Close">✕</button>
+            </div>
+
+            <div className="mt-3 flex rounded-md border border-zinc-800 overflow-hidden w-fit">
               <button
-                onClick={() => setAddOpen(false)}
-                className="text-zinc-400 hover:text-zinc-200"
-                aria-label="Close"
+                onClick={() => { setAddSource("nintendo"); setAddResults([]); setAddedKeys(new Set()); }}
+                className={`px-3 py-1.5 text-sm ${addSource === "nintendo" ? "bg-zinc-700 text-white" : "bg-zinc-900 text-zinc-400 hover:text-zinc-200"}`}
               >
-                ✕
+                Nintendo
+              </button>
+              <button
+                onClick={() => { setAddSource("steam"); setAddResults([]); setAddedKeys(new Set()); }}
+                className={`px-3 py-1.5 text-sm ${addSource === "steam" ? "bg-zinc-700 text-white" : "bg-zinc-900 text-zinc-400 hover:text-zinc-200"}`}
+              >
+                Steam
               </button>
             </div>
-            <p className="text-xs text-zinc-400 mt-1 mb-3">
-              Search IGDB and click Add — or paste an IGDB link.
+            <p className="text-xs text-zinc-400 mt-2 mb-3">
+              {addSource === "steam"
+                ? "Search Steam and click Add (adds to your wishlist / wanted)."
+                : "Search IGDB and click Add — or paste an IGDB link."}
             </p>
+
             <input
               autoFocus
               value={addQuery}
               onChange={(e) => setAddQuery(e.target.value)}
-              placeholder="Search games... (e.g. Breath of the Wild)"
+              placeholder={addSource === "steam" ? "Search Steam..." : "Search games..."}
               className="w-full rounded-md bg-zinc-950 border border-zinc-700 px-3 py-2 text-sm outline-none focus:border-zinc-500"
             />
             {addError && <p className="text-xs text-red-400 mt-2">{addError}</p>}
 
             <div className="mt-3 max-h-[50vh] overflow-y-auto">
-              {/igdb\.com\/games\//i.test(addQuery) ? (
+              {addSource === "nintendo" && /igdb\.com\/games\//i.test(addQuery) ? (
                 <button
                   onClick={() => addGame({ url: addQuery })}
-                  disabled={addingId === -1}
                   className="w-full rounded-md bg-red-600 hover:bg-red-500 text-white text-sm font-semibold px-3 py-2"
                 >
                   Add from this link
@@ -407,54 +545,35 @@ export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
               ) : addSearching ? (
                 <p className="text-sm text-zinc-500 py-4 text-center">Searching…</p>
               ) : addQuery.trim().length < 2 ? (
-                <p className="text-sm text-zinc-600 py-4 text-center">
-                  Type at least 2 characters to search.
-                </p>
+                <p className="text-sm text-zinc-600 py-4 text-center">Type at least 2 characters to search.</p>
               ) : addResults.length === 0 ? (
-                <p className="text-sm text-zinc-500 py-4 text-center">
-                  No Switch games found.
-                </p>
+                <p className="text-sm text-zinc-500 py-4 text-center">No games found.</p>
               ) : (
                 <ul className="flex flex-col gap-1">
                   {addResults.map((r) => {
-                    const added = addedIds.has(r.igdbId);
+                    const added = addedKeys.has(r.key);
                     return (
-                      <li
-                        key={r.igdbId}
-                        className="flex items-center gap-3 rounded-md p-2 hover:bg-zinc-800/50"
-                      >
+                      <li key={r.key} className="flex items-center gap-3 rounded-md p-2 hover:bg-zinc-800/50">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         {r.coverUrl ? (
-                          <img
-                            src={r.coverUrl}
-                            alt=""
-                            className="h-12 w-9 object-cover rounded shrink-0"
-                          />
+                          <img src={r.coverUrl} alt="" className="h-12 w-9 object-cover rounded shrink-0" />
                         ) : (
                           <div className="h-12 w-9 rounded bg-zinc-800 shrink-0" />
                         )}
                         <div className="min-w-0 flex-1">
-                          <div className="text-sm font-medium truncate">
-                            {r.name}
-                          </div>
-                          <div className="text-xs text-zinc-500">
-                            {`${r.year ?? "TBA"} · ${r.platform}`}
-                          </div>
+                          <div className="text-sm font-medium truncate">{r.name}</div>
+                          <div className="text-xs text-zinc-500">{r.sub}</div>
                         </div>
                         <button
-                          onClick={() => addGame({ igdbId: r.igdbId }, r.igdbId)}
-                          disabled={added || addingId === r.igdbId}
+                          onClick={() => addGame(r.payload, r.key)}
+                          disabled={added || addingKey === r.key}
                           className={`shrink-0 rounded-md text-xs font-semibold px-3 py-1.5 border ${
                             added
                               ? "border-emerald-500/40 text-emerald-300 bg-emerald-500/10"
                               : "bg-red-600 hover:bg-red-500 text-white border-red-600 disabled:opacity-50"
                           }`}
                         >
-                          {added
-                            ? "Added ✓"
-                            : addingId === r.igdbId
-                              ? "Adding…"
-                              : "Add"}
+                          {added ? "Added ✓" : addingKey === r.key ? "Adding…" : "Add"}
                         </button>
                       </li>
                     );
@@ -530,34 +649,22 @@ function Select({
 }
 
 function FormatSourceBadge({ game: g }: { game: Game }) {
-  if (g.physicalFormat === "Unknown") return null;
+  if (g.physicalFormat === "Unknown" || g.library === "steam") return null;
   const src = g.formatSource;
   if (src === "manual") {
     return (
-      <span
-        title="You confirmed this format"
-        className="text-[10px] rounded px-1.5 py-0.5 bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
-      >
+      <span title="You confirmed this format" className="text-[10px] rounded px-1.5 py-0.5 bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
         ✓ confirmed
       </span>
     );
   }
   if (src === "brave" || src === "nintendo" || src === "llm") {
-    if (g.needsReview) {
-      return (
-        <span
-          title={`Auto-detected (${src}) — please verify`}
-          className="text-[10px] rounded px-1.5 py-0.5 bg-amber-500/15 text-amber-300 border border-amber-500/30"
-        >
-          auto?
-        </span>
-      );
-    }
-    return (
-      <span
-        title={`Auto-detected (${src})`}
-        className="text-[10px] rounded px-1.5 py-0.5 bg-zinc-700/40 text-zinc-300 border border-zinc-600"
-      >
+    return g.needsReview ? (
+      <span title={`Auto-detected (${src}) — please verify`} className="text-[10px] rounded px-1.5 py-0.5 bg-amber-500/15 text-amber-300 border border-amber-500/30">
+        auto?
+      </span>
+    ) : (
+      <span title={`Auto-detected (${src})`} className="text-[10px] rounded px-1.5 py-0.5 bg-zinc-700/40 text-zinc-300 border border-zinc-600">
         auto
       </span>
     );
@@ -565,109 +672,28 @@ function FormatSourceBadge({ game: g }: { game: Game }) {
   return null;
 }
 
-function GameRow({
+function BacklogButton({
   game: g,
-  busy,
-  onStatus,
-  onFormat,
-  onHide,
+  onBacklog,
+  full = false,
 }: {
   game: Game;
-  busy: boolean;
-  onStatus: (g: Game, s: GameStatus) => void;
-  onFormat: (g: Game, v: string) => void;
-  onHide: (g: Game) => void;
+  onBacklog: (id: number, action: "add" | "remove") => void;
+  full?: boolean;
 }) {
-  const score = g.opencriticScore ?? g.metacriticScore ?? g.igdbRating;
+  const inBacklog = g.backlogOrder != null;
   return (
-    <tr className="border-t border-zinc-800 hover:bg-zinc-900/40">
-      <td className="px-3 py-2">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        {g.coverImageUrl ? (
-          g.igdbUrl ? (
-            <a href={g.igdbUrl} target="_blank" rel="noopener noreferrer" title="View on IGDB">
-              <img
-                src={g.coverImageUrl}
-                alt=""
-                loading="lazy"
-                className="h-10 w-8 object-cover rounded"
-              />
-            </a>
-          ) : (
-            <img
-              src={g.coverImageUrl}
-              alt=""
-              loading="lazy"
-              className="h-10 w-8 object-cover rounded"
-            />
-          )
-        ) : (
-          <div className="h-10 w-8 rounded bg-zinc-800" />
-        )}
-      </td>
-      <td className="px-3 py-2">
-        <div className="font-medium">{g.title}</div>
-        {g.needsReview && (
-          <span className="text-[10px] text-amber-400">needs review</span>
-        )}
-      </td>
-      <td className="px-3 py-2 text-zinc-300 whitespace-nowrap">{g.platform}</td>
-      <td className="px-3 py-2">
-        <div className="flex items-center gap-2">
-          <select
-            disabled={busy}
-            value={g.physicalFormat}
-            onChange={(e) => onFormat(g, e.target.value)}
-            className="rounded bg-zinc-950 border border-zinc-700 px-1.5 py-1 text-xs outline-none focus:border-zinc-500"
-          >
-            {PHYSICAL_FORMATS.map((f) => (
-              <option key={f} value={f}>
-                {f}
-              </option>
-            ))}
-          </select>
-          <FormatSourceBadge game={g} />
-        </div>
-      </td>
-      <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">
-        {g.releaseDate ?? "—"}
-      </td>
-      <td className="px-3 py-2 text-zinc-300">{score != null ? score : "—"}</td>
-      <td className="px-3 py-2">
-        <div className="flex gap-1">
-          <button
-            disabled={busy}
-            onClick={() => onStatus(g, "owned")}
-            className={`rounded px-2 py-1 text-xs border ${
-              g.status === "owned"
-                ? "bg-emerald-500 text-black border-emerald-500"
-                : "border-zinc-700 text-zinc-300 hover:border-emerald-500/60"
-            }`}
-          >
-            Owned
-          </button>
-          <button
-            disabled={busy}
-            onClick={() => onStatus(g, "wanted")}
-            className={`rounded px-2 py-1 text-xs border ${
-              g.status === "wanted"
-                ? "bg-pink-500 text-black border-pink-500"
-                : "border-zinc-700 text-zinc-300 hover:border-pink-500/60"
-            }`}
-          >
-            Wanted
-          </button>
-          <button
-            disabled={busy}
-            onClick={() => onHide(g)}
-            className="rounded px-2 py-1 text-xs border border-zinc-800 text-zinc-500 hover:text-zinc-200 hover:border-zinc-600"
-            title={g.hidden ? "Unhide" : "Hide from library"}
-          >
-            {g.hidden ? "Unhide" : "Hide"}
-          </button>
-        </div>
-      </td>
-    </tr>
+    <button
+      onClick={() => onBacklog(g.id, inBacklog ? "remove" : "add")}
+      title={inBacklog ? "Remove from backlog" : "Add to backlog planner"}
+      className={`rounded-md text-xs py-1 border ${full ? "" : "px-2"} ${
+        inBacklog
+          ? "border-indigo-500/40 text-indigo-300 bg-indigo-500/10"
+          : "border-zinc-800 text-zinc-500 hover:text-zinc-200 hover:border-zinc-600"
+      }`}
+    >
+      {inBacklog ? "★ In backlog" : "☆ Backlog"}
+    </button>
   );
 }
 
@@ -677,59 +703,40 @@ function GameCard({
   onStatus,
   onFormat,
   onHide,
+  onBacklog,
 }: {
   game: Game;
   busy: boolean;
   onStatus: (g: Game, s: GameStatus) => void;
   onFormat: (g: Game, v: string) => void;
   onHide: (g: Game) => void;
+  onBacklog: (id: number, action: "add" | "remove") => void;
 }) {
+  const link = g.igdbUrl || g.storeUrl;
+  const isSteam = g.library === "steam";
+  const playtime = playtimeLabel(g.playtimeMinutes);
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 overflow-hidden flex flex-col">
       <div className="relative aspect-[3/4] bg-zinc-800">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         {g.coverImageUrl ? (
-          g.igdbUrl ? (
-            <a
-              href={g.igdbUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block h-full w-full"
-              title="View on IGDB"
-            >
-              <img
-                src={g.coverImageUrl}
-                alt={g.title}
-                loading="lazy"
-                className="h-full w-full object-cover"
-              />
+          link ? (
+            <a href={link} target="_blank" rel="noopener noreferrer" className="block h-full w-full" title="View store / IGDB page">
+              <img src={g.coverImageUrl} alt={g.title} loading="lazy" className="h-full w-full object-cover" />
             </a>
           ) : (
-            <img
-              src={g.coverImageUrl}
-              alt={g.title}
-              loading="lazy"
-              className="h-full w-full object-cover"
-            />
+            <img src={g.coverImageUrl} alt={g.title} loading="lazy" className="h-full w-full object-cover" />
           )
         ) : (
-          <div className="h-full w-full grid place-items-center text-zinc-600 text-sm">
-            No cover
-          </div>
+          <div className="h-full w-full grid place-items-center text-zinc-600 text-sm">No cover</div>
         )}
-        {g.needsReview && (
+        {g.needsReview && !isSteam && (
           <span className="absolute top-2 left-2 rounded-full bg-amber-500/90 text-black text-[10px] font-bold px-2 py-0.5">
             NEW · REVIEW
           </span>
         )}
         {g.status && (
-          <span
-            className={`absolute top-2 right-2 rounded-full text-[10px] font-bold px-2 py-0.5 ${
-              g.status === "owned"
-                ? "bg-emerald-500 text-black"
-                : "bg-pink-500 text-black"
-            }`}
-          >
+          <span className={`absolute top-2 right-2 rounded-full text-[10px] font-bold px-2 py-0.5 ${g.status === "owned" ? "bg-emerald-500 text-black" : "bg-pink-500 text-black"}`}>
             {g.status.toUpperCase()}
           </span>
         )}
@@ -740,48 +747,30 @@ function GameCard({
           <h3 className="font-semibold text-sm leading-tight">{g.title}</h3>
           <div className="shrink-0 flex flex-col items-end gap-0.5">
             {g.metacriticScore != null && (
-              <span
-                title="Metacritic"
-                className="text-[10px] font-bold rounded px-1.5 py-0.5 bg-zinc-800 text-zinc-200"
-              >
-                MC {g.metacriticScore}
-              </span>
+              <span title="Metacritic" className="text-[10px] font-bold rounded px-1.5 py-0.5 bg-zinc-800 text-zinc-200">MC {g.metacriticScore}</span>
             )}
             {g.opencriticScore != null && (
-              <span
-                title="OpenCritic"
-                className="text-[10px] font-bold rounded px-1.5 py-0.5 bg-zinc-800 text-zinc-200"
-              >
-                OC {g.opencriticScore}
-              </span>
+              <span title="OpenCritic" className="text-[10px] font-bold rounded px-1.5 py-0.5 bg-zinc-800 text-zinc-200">OC {g.opencriticScore}</span>
             )}
             {g.igdbRating != null && (
-              <span
-                title="IGDB critic rating"
-                className="text-[10px] font-bold rounded px-1.5 py-0.5 bg-zinc-800 text-zinc-200"
-              >
-                IGDB {g.igdbRating}
-              </span>
+              <span title="IGDB critic rating" className="text-[10px] font-bold rounded px-1.5 py-0.5 bg-zinc-800 text-zinc-200">IGDB {g.igdbRating}</span>
             )}
           </div>
         </div>
 
         <div className="flex flex-wrap gap-1">
-          <span className="text-[10px] rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-300">
-            {g.platform}
-          </span>
-          <span
-            className={`text-[10px] rounded border px-1.5 py-0.5 ${
-              FORMAT_STYLES[g.physicalFormat] ?? FORMAT_STYLES.Unknown
-            }`}
-          >
-            {g.physicalFormat}
-          </span>
-          <FormatSourceBadge game={g} />
-          {g.releaseDate && (
-            <span className="text-[10px] rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-400">
-              {g.releaseDate}
+          <span className="text-[10px] rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-300">{g.platform}</span>
+          {!isSteam && (
+            <span className={`text-[10px] rounded border px-1.5 py-0.5 ${FORMAT_STYLES[g.physicalFormat] ?? FORMAT_STYLES.Unknown}`}>
+              {g.physicalFormat}
             </span>
+          )}
+          <FormatSourceBadge game={g} />
+          {playtime && (
+            <span className="text-[10px] rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-400">{playtime}</span>
+          )}
+          {g.releaseDate && (
+            <span className="text-[10px] rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-400">{g.releaseDate}</span>
           )}
         </div>
 
@@ -790,48 +779,266 @@ function GameCard({
             <button
               disabled={busy}
               onClick={() => onStatus(g, "owned")}
-              className={`flex-1 rounded-md text-xs font-semibold py-1.5 border transition ${
-                g.status === "owned"
-                  ? "bg-emerald-500 text-black border-emerald-500"
-                  : "border-zinc-700 text-zinc-300 hover:border-emerald-500/60"
-              }`}
+              className={`flex-1 rounded-md text-xs font-semibold py-1.5 border transition ${g.status === "owned" ? "bg-emerald-500 text-black border-emerald-500" : "border-zinc-700 text-zinc-300 hover:border-emerald-500/60"}`}
             >
               Owned
             </button>
             <button
               disabled={busy}
               onClick={() => onStatus(g, "wanted")}
-              className={`flex-1 rounded-md text-xs font-semibold py-1.5 border transition ${
-                g.status === "wanted"
-                  ? "bg-pink-500 text-black border-pink-500"
-                  : "border-zinc-700 text-zinc-300 hover:border-pink-500/60"
-              }`}
+              className={`flex-1 rounded-md text-xs font-semibold py-1.5 border transition ${g.status === "wanted" ? "bg-pink-500 text-black border-pink-500" : "border-zinc-700 text-zinc-300 hover:border-pink-500/60"}`}
             >
               Wanted
             </button>
           </div>
-          <select
+          {!isSteam && (
+            <select
+              disabled={busy}
+              value={g.physicalFormat}
+              onChange={(e) => onFormat(g, e.target.value)}
+              className="rounded-md bg-zinc-950 border border-zinc-700 px-2 py-1.5 text-xs outline-none focus:border-zinc-500"
+              title="Physical format"
+            >
+              {PHYSICAL_FORMATS.map((f) => (
+                <option key={f} value={f}>{f}</option>
+              ))}
+            </select>
+          )}
+          <div className="flex gap-2">
+            <BacklogButton game={g} onBacklog={onBacklog} />
+            <button
+              disabled={busy}
+              onClick={() => onHide(g)}
+              className="flex-1 rounded-md border border-zinc-800 text-zinc-500 hover:text-zinc-200 hover:border-zinc-600 text-xs py-1"
+            >
+              {g.hidden ? "Unhide" : "Hide"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GameRow({
+  game: g,
+  busy,
+  onStatus,
+  onFormat,
+  onHide,
+  onBacklog,
+}: {
+  game: Game;
+  busy: boolean;
+  onStatus: (g: Game, s: GameStatus) => void;
+  onFormat: (g: Game, v: string) => void;
+  onHide: (g: Game) => void;
+  onBacklog: (id: number, action: "add" | "remove") => void;
+}) {
+  const score = g.opencriticScore ?? g.metacriticScore ?? g.igdbRating;
+  const link = g.igdbUrl || g.storeUrl;
+  const isSteam = g.library === "steam";
+  return (
+    <tr className="border-t border-zinc-800 hover:bg-zinc-900/40">
+      <td className="px-3 py-2">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        {g.coverImageUrl ? (
+          link ? (
+            <a href={link} target="_blank" rel="noopener noreferrer" title="View store / IGDB page">
+              <img src={g.coverImageUrl} alt="" loading="lazy" className="h-10 w-8 object-cover rounded" />
+            </a>
+          ) : (
+            <img src={g.coverImageUrl} alt="" loading="lazy" className="h-10 w-8 object-cover rounded" />
+          )
+        ) : (
+          <div className="h-10 w-8 rounded bg-zinc-800" />
+        )}
+      </td>
+      <td className="px-3 py-2">
+        <div className="font-medium">{g.title}</div>
+        {g.needsReview && !isSteam && <span className="text-[10px] text-amber-400">needs review</span>}
+      </td>
+      <td className="px-3 py-2 text-zinc-300 whitespace-nowrap">{g.platform}</td>
+      <td className="px-3 py-2">
+        {isSteam ? (
+          <span className="text-xs text-zinc-500">Digital</span>
+        ) : (
+          <div className="flex items-center gap-2">
+            <select
+              disabled={busy}
+              value={g.physicalFormat}
+              onChange={(e) => onFormat(g, e.target.value)}
+              className="rounded bg-zinc-950 border border-zinc-700 px-1.5 py-1 text-xs outline-none focus:border-zinc-500"
+            >
+              {PHYSICAL_FORMATS.map((f) => (
+                <option key={f} value={f}>{f}</option>
+              ))}
+            </select>
+            <FormatSourceBadge game={g} />
+          </div>
+        )}
+      </td>
+      <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">{g.releaseDate ?? "—"}</td>
+      <td className="px-3 py-2 text-zinc-300">{score != null ? score : "—"}</td>
+      <td className="px-3 py-2">
+        <div className="flex gap-1">
+          <button
             disabled={busy}
-            value={g.physicalFormat}
-            onChange={(e) => onFormat(g, e.target.value)}
-            className="rounded-md bg-zinc-950 border border-zinc-700 px-2 py-1.5 text-xs outline-none focus:border-zinc-500"
-            title="Physical format"
+            onClick={() => onStatus(g, "owned")}
+            className={`rounded px-2 py-1 text-xs border ${g.status === "owned" ? "bg-emerald-500 text-black border-emerald-500" : "border-zinc-700 text-zinc-300 hover:border-emerald-500/60"}`}
           >
-            {PHYSICAL_FORMATS.map((f) => (
-              <option key={f} value={f}>
-                {f}
-              </option>
-            ))}
-          </select>
+            Owned
+          </button>
+          <button
+            disabled={busy}
+            onClick={() => onStatus(g, "wanted")}
+            className={`rounded px-2 py-1 text-xs border ${g.status === "wanted" ? "bg-pink-500 text-black border-pink-500" : "border-zinc-700 text-zinc-300 hover:border-pink-500/60"}`}
+          >
+            Wanted
+          </button>
+          <button
+            onClick={() => onBacklog(g.id, g.backlogOrder != null ? "remove" : "add")}
+            className={`rounded px-2 py-1 text-xs border ${g.backlogOrder != null ? "border-indigo-500/40 text-indigo-300 bg-indigo-500/10" : "border-zinc-700 text-zinc-400 hover:border-zinc-500"}`}
+            title="Backlog"
+          >
+            {g.backlogOrder != null ? "★" : "☆"}
+          </button>
           <button
             disabled={busy}
             onClick={() => onHide(g)}
-            className="rounded-md border border-zinc-800 text-zinc-500 hover:text-zinc-200 hover:border-zinc-600 text-xs py-1"
+            className="rounded px-2 py-1 text-xs border border-zinc-800 text-zinc-500 hover:text-zinc-200 hover:border-zinc-600"
           >
             {g.hidden ? "Unhide" : "Hide"}
           </button>
         </div>
+      </td>
+    </tr>
+  );
+}
+
+function Planner({
+  active,
+  done,
+  onAction,
+}: {
+  active: Game[];
+  done: Game[];
+  onAction: (
+    id: number,
+    action: "add" | "remove" | "up" | "down" | "complete" | "uncomplete",
+  ) => void;
+}) {
+  const total = active.length + done.length;
+  if (total === 0) {
+    return (
+      <div className="text-center text-zinc-500 py-20">
+        Your backlog is empty. Add games with the ☆ Backlog button on any game.
       </div>
+    );
+  }
+  return (
+    <div className="max-w-3xl">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-bold">Backlog planner</h2>
+        <span className="text-sm text-zinc-400">
+          {done.length} of {total} completed
+        </span>
+      </div>
+      <div className="h-2 rounded-full bg-zinc-800 mb-6 overflow-hidden">
+        <div
+          className="h-full bg-emerald-500"
+          style={{ width: `${total ? (done.length / total) * 100 : 0}%` }}
+        />
+      </div>
+
+      <ul className="flex flex-col gap-2">
+        {active.map((g, i) => (
+          <PlannerRow key={g.id} game={g} index={i + 1} count={active.length} onAction={onAction} />
+        ))}
+      </ul>
+
+      {done.length > 0 && (
+        <>
+          <h3 className="text-sm font-semibold text-zinc-400 mt-8 mb-2">Completed</h3>
+          <ul className="flex flex-col gap-2">
+            {done.map((g) => (
+              <PlannerRow key={g.id} game={g} onAction={onAction} completedRow />
+            ))}
+          </ul>
+        </>
+      )}
     </div>
+  );
+}
+
+function PlannerRow({
+  game: g,
+  index,
+  count,
+  onAction,
+  completedRow = false,
+}: {
+  game: Game;
+  index?: number;
+  count?: number;
+  onAction: (
+    id: number,
+    action: "add" | "remove" | "up" | "down" | "complete" | "uncomplete",
+  ) => void;
+  completedRow?: boolean;
+}) {
+  return (
+    <li className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900/50 p-2">
+      {!completedRow && (
+        <div className="flex flex-col">
+          <button
+            onClick={() => onAction(g.id, "up")}
+            disabled={index === 1}
+            className="text-zinc-500 hover:text-zinc-200 disabled:opacity-30 leading-none text-xs"
+            title="Move up"
+          >
+            ▲
+          </button>
+          <button
+            onClick={() => onAction(g.id, "down")}
+            disabled={index === count}
+            className="text-zinc-500 hover:text-zinc-200 disabled:opacity-30 leading-none text-xs"
+            title="Move down"
+          >
+            ▼
+          </button>
+        </div>
+      )}
+      {!completedRow && <div className="w-6 text-center text-sm font-bold text-zinc-500">{index}</div>}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      {g.coverImageUrl ? (
+        <img src={g.coverImageUrl} alt="" className="h-12 w-9 object-cover rounded shrink-0" />
+      ) : (
+        <div className="h-12 w-9 rounded bg-zinc-800 shrink-0" />
+      )}
+      <div className="min-w-0 flex-1">
+        <div className={`text-sm font-medium truncate ${completedRow ? "line-through text-zinc-500" : ""}`}>
+          {g.title}
+        </div>
+        <div className="text-xs text-zinc-500">{g.platform}</div>
+      </div>
+      <button
+        onClick={() => onAction(g.id, completedRow ? "uncomplete" : "complete")}
+        className={`rounded-md text-xs font-semibold px-2.5 py-1.5 border ${
+          completedRow
+            ? "border-zinc-700 text-zinc-300 hover:border-zinc-500"
+            : "border-emerald-500/40 text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20"
+        }`}
+      >
+        {completedRow ? "Undo" : "✓ Done"}
+      </button>
+      <button
+        onClick={() => onAction(g.id, "remove")}
+        className="rounded-md text-xs px-2 py-1.5 border border-zinc-800 text-zinc-500 hover:text-zinc-200 hover:border-zinc-600"
+        title="Remove from backlog"
+      >
+        ✕
+      </button>
+    </li>
   );
 }

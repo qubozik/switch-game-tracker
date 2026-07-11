@@ -11,16 +11,20 @@ import {
 } from "drizzle-orm/pg-core";
 
 // Physical format values: "Full Cart" | "Key Card" | "Digital Only" | "Unknown"
-// Platform values: "Switch 2" | "Switch" | "Both"
+// Platform values: "Switch 2" | "Switch" | "Both" | "Steam"
+// Library values: "nintendo" | "steam"
 // Status values: "owned" | "wanted" | null (untracked)
-// Source values: "curated" | "igdb"
+// Source values: "curated" | "igdb" | "steam"
 
 export const games = pgTable("games", {
   id: serial("id").primaryKey(),
   igdbId: integer("igdb_id").unique(),
   igdbUrl: text("igdb_url"),
+  steamAppId: integer("steam_app_id").unique(),
+  storeUrl: text("store_url"),
+  library: text("library").default("nintendo").notNull(),
 
-  title: text("title").notNull().unique(),
+  title: text("title").notNull(),
   releaseDate: date("release_date"),
   released: boolean("released").default(false).notNull(),
   platform: text("platform").default("Switch 2").notNull(),
@@ -52,6 +56,12 @@ export const games = pgTable("games", {
   // Personal tracking (original goal)
   status: text("status"), // "owned" | "wanted" | null
   hidden: boolean("hidden").default(false).notNull(),
+  playtimeMinutes: integer("playtime_minutes"),
+
+  // Backlog completion planner
+  backlogOrder: integer("backlog_order"), // null = not in backlog
+  completed: boolean("completed").default(false).notNull(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
 
   // Sync bookkeeping
   needsReview: boolean("needs_review").default(false).notNull(),

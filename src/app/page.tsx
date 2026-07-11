@@ -15,6 +15,9 @@ export default async function Home() {
   const initialGames: Game[] = rows.map((r) => ({
     id: r.id,
     igdbId: r.igdbId,
+    steamAppId: r.steamAppId,
+    storeUrl: r.storeUrl,
+    library: r.library,
     title: r.title,
     releaseDate: r.releaseDate,
     released: r.released,
@@ -38,6 +41,9 @@ export default async function Home() {
     description: r.description,
     status: (r.status as GameStatus) ?? null,
     hidden: r.hidden,
+    playtimeMinutes: r.playtimeMinutes,
+    backlogOrder: r.backlogOrder,
+    completed: r.completed,
     needsReview: r.needsReview,
     source: r.source,
   }));

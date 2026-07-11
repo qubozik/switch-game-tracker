@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { games, type NewGame } from "@/db/schema";
 import { fetchRecentSwitchGames } from "@/lib/igdb";
 import { detectFormat, type FormatDetection } from "@/lib/format-detect";
+import { runSteamSync, type SteamSyncResult } from "@/lib/steam-sync";
 import { eq, inArray, sql } from "drizzle-orm";
 
 export type SyncResult = {
@@ -11,6 +12,7 @@ export type SyncResult = {
   formatsDetected: number;
   braveLookups: number;
   addedTitles: string[];
+  steam: SteamSyncResult | null;
   ranAt: string;
 };
 
@@ -151,6 +153,16 @@ export async function runSync(): Promise<SyncResult> {
     addedTitles.push(...inserted.map((r) => r.title));
   }
 
+  // Fold in the Steam sync (owned + wishlist) when configured.
+  let steam: SteamSyncResult | null = null;
+  if (process.env.STEAM_API_KEY && process.env.STEAM_ID) {
+    try {
+      steam = await runSteamSync();
+    } catch {
+      steam = null;
+    }
+  }
+
   return {
     added,
     skipped: candidates.length - added,
@@ -158,6 +170,7 @@ export async function runSync(): Promise<SyncResult> {
     formatsDetected,
     braveLookups,
     addedTitles,
+    steam,
     ranAt: new Date().toISOString(),
   };
 }

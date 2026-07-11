@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { games, type NewGame } from "@/db/schema";
 import { fetchGameById, fetchGameBySlug, parseIgdbSlug } from "@/lib/igdb";
+import { getAppDetails, steamCapsule, steamStoreUrl } from "@/lib/steam";
 import { detectFormat } from "@/lib/format-detect";
 import { eq, or } from "drizzle-orm";
 
@@ -9,13 +10,55 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
-  let body: { url?: unknown; igdbId?: unknown };
+  let body: { url?: unknown; igdbId?: unknown; steamAppId?: unknown };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  // --- Steam game (added as a wishlist / wanted item) ---
+  if (typeof body.steamAppId === "number") {
+    const appId = body.steamAppId;
+    const dupe = await db
+      .select({ id: games.id, title: games.title })
+      .from(games)
+      .where(eq(games.steamAppId, appId));
+    if (dupe.length) {
+      return NextResponse.json(
+        { error: `"${dupe[0].title}" is already in your library.`, duplicate: true },
+        { status: 409 },
+      );
+    }
+    const d = await getAppDetails(appId);
+    if (!d) {
+      return NextResponse.json(
+        { error: "That Steam game couldn't be found." },
+        { status: 404 },
+      );
+    }
+    const row: NewGame = {
+      steamAppId: appId,
+      title: d.name,
+      platform: "Steam",
+      library: "steam",
+      source: "steam",
+      status: "wanted",
+      released: d.released,
+      releaseDate: d.releaseDate,
+      description: d.description,
+      genre: d.genre,
+      physicalFormat: "Digital Only",
+      formatSource: "steam",
+      coverImageUrl: steamCapsule(appId),
+      storeUrl: steamStoreUrl(appId),
+      needsReview: false,
+    };
+    const inserted = await db.insert(games).values(row).returning();
+    return NextResponse.json({ game: inserted[0] });
+  }
+
+  // --- Nintendo game via IGDB (by id or link) ---
   let g;
   try {
     if (typeof body.igdbId === "number") {
@@ -63,6 +106,7 @@ export async function POST(req: NextRequest) {
   const row: NewGame = {
     igdbId: g.igdbId,
     igdbUrl: g.igdbUrl,
+    library: "nintendo",
     title: g.title,
     releaseDate: g.releaseDate,
     released: g.released,

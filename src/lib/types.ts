@@ -10,6 +10,10 @@ export const PHYSICAL_FORMATS = [
 export interface Game {
   id: number;
   igdbId: number | null;
+  igdbUrl: string | null;
+  steamAppId: number | null;
+  storeUrl: string | null;
+  library: string;
   title: string;
   releaseDate: string | null;
   released: boolean;
@@ -22,7 +26,6 @@ export interface Game {
   opencriticScore: number | null;
   igdbRating: number | null;
   coverImageUrl: string | null;
-  igdbUrl: string | null;
   howLongToBeatHours: number | null;
   isMultiplayer: boolean;
   isLocalCoop: boolean;
@@ -33,6 +36,9 @@ export interface Game {
   description: string | null;
   status: GameStatus;
   hidden: boolean;
+  playtimeMinutes: number | null;
+  backlogOrder: number | null;
+  completed: boolean;
   needsReview: boolean;
   source: string;
 }
