@@ -1,10 +1,11 @@
-# Switch Game Tracker
+# Game Tracker
 
-A personal, self-hosted tracker for Nintendo **Switch** and **Switch 2** games.
-Mark what you **own** and **want**, and — most importantly — know each physical
-release's **cart type**: full game on cartridge, Switch 2 **Game‑Key Card**, or
-digital. New releases, review scores, and cover art are pulled in and kept
-up‑to‑date automatically every week.
+A personal, self-hosted tracker for **Nintendo Switch / Switch 2** and **Steam**
+games. Mark what you **own** and **want**, know each Nintendo physical release's
+**cart type** (full cartridge, Switch 2 **Game‑Key Card**, or digital), sync your
+whole **Steam library + wishlist**, and plan what to play next with a **backlog
+completion planner**. New releases, review scores, and cover art are pulled in and
+kept up‑to‑date automatically every week.
 
 > Live: `https://switch-dashboard-iota.vercel.app` (password protected)
 
@@ -12,20 +13,24 @@ up‑to‑date automatically every week.
 
 ## Features
 
+- **Libraries & tabs** — `All` · `Switch` · `Switch 2` · `Steam` · `Planner`. Work
+  on each library separately or all together.
 - **Owned / Wanted tracking** per game, saved to the database (not browser cache).
-- **Physical format** tracking — `Full Cart` · `Key Card` · `Digital Only` · `Unknown`
-  — editable per game, with a badge showing how it was determined.
+- **Steam sync** — your owned library (→ owned) and wishlist (→ wanted), one‑way,
+  with playtime and store links.
+- **Physical format** tracking (Nintendo) — `Full Cart` · `Key Card` · `Digital Only`
+  · `Unknown` — editable, with a badge showing how it was determined.
 - **Automatic cart‑type detection** for new games (see [Detection pipeline](#detection-pipeline)).
-- **IGDB critic scores** and **official cover art** across the whole catalog.
+- **Backlog completion planner** — a prioritized, ordered list across all libraries
+  with **drag‑and‑drop** (and up/down) reordering, completion tracking, and progress.
+- **IGDB critic scores** and **official cover art** across the catalog; covers link
+  to the IGDB / Steam store page.
 - **Weekly auto‑sync** (Sundays, 5 AM Eastern): discovers new Switch/Switch 2
-  releases, and refreshes existing games' scores, release dates, and missing covers.
-- **Search, filter and sort** — by platform, format, status, availability; sort by
-  release date, title, or score.
-- **Clickable stat cards** (Total / Owned / Wanted / Released / Upcoming / Needs review)
-  that act as one‑click filters.
+  releases, refreshes scores/dates/covers, and re‑syncs Steam.
+- **Search, filter and sort**; **clickable stat cards** as one‑click filters.
 - **Grid and Table views.**
 - **Hide** games you'll never want (excluded by default, with a "Show hidden" toggle).
-- **Manually add any game** (including Switch 1 titles) via built-in IGDB search.
+- **Manually add any game** via built-in **IGDB or Steam search** (or an IGDB link).
 - **Password protection** for the whole site and API (single shared password).
 
 ---
@@ -36,8 +41,8 @@ up‑to‑date automatically every week.
 - **Vercel Postgres (Neon)** with **Drizzle ORM**
 - **Vercel Cron** for the weekly sync
 - **Next.js middleware** for password (Basic Auth)
-- External data: **IGDB** (via Twitch app), **Brave Search API**, and an optional
-  **OpenAI‑compatible LLM** (e.g. Ollama Cloud)
+- External data: **IGDB** (via Twitch app), **Steam Web API** + storefront,
+  **Brave Search API**, and an optional **OpenAI‑compatible LLM** (e.g. Ollama Cloud)
 
 ---
 
@@ -66,20 +71,24 @@ Key columns:
 
 | Column | Notes |
 |---|---|
-| `title` | unique |
-| `igdb_id` | linked IGDB id (nullable) |
-| `igdb_url` | link to the game's IGDB page (cover art links here) |
+| `title` | game title |
+| `library` | `nintendo` · `steam` |
+| `igdb_id` / `igdb_url` | IGDB id + page link (Nintendo) |
+| `steam_app_id` / `store_url` | Steam AppID + store link (Steam) |
 | `release_date`, `released` | refreshed weekly |
-| `platform` | `Switch 2` · `Switch` · `Both` |
+| `platform` | `Switch 2` · `Switch` · `Both` · `Steam` |
 | `genre` | jsonb array |
 | `physical_format` | `Full Cart` · `Key Card` · `Digital Only` · `Unknown` |
 | `format_source` | how the format was set |
 | `metacritic_score`, `opencritic_score`, `igdb_rating` | review scores |
-| `cover_image_url` | IGDB cover art |
+| `cover_image_url` | cover art (IGDB or Steam) |
+| `playtime_minutes` | from Steam |
 | `status` | `owned` · `wanted` · `null` |
 | `hidden` | excluded from the default view |
+| `backlog_order` | position in the backlog planner (`null` = not in backlog) |
+| `completed`, `completed_at` | backlog completion |
 | `needs_review` | unconfirmed auto‑detected data |
-| `source` | `curated` · `igdb` |
+| `source` | `curated` · `igdb` · `steam` |
 
 ---
 
@@ -89,9 +98,12 @@ Key columns:
 |---|---|---|
 | `/api/games` | GET | List all games |
 | `/api/games/:id` | PATCH | Update `status`, `physicalFormat`, `needsReview`, or `hidden` |
-| `/api/games/add` | POST | Add a game by IGDB id or link (`{ "igdbId": 1234 }` or `{ "url": "..." }`); runs format detection |
-| `/api/igdb/search` | GET | Search IGDB for Switch/Switch 2 games (`?q=`) for the Add picker |
-| `/api/sync` | GET/POST | Run the weekly sync (guarded by `CRON_SECRET`) |
+| `/api/games/add` | POST | Add a game by IGDB (`igdbId`/`url`) or Steam (`steamAppId`); runs format detection |
+| `/api/igdb/search` | GET | Search IGDB for Switch/Switch 2 games (`?q=`) |
+| `/api/steam/search` | GET | Search Steam games (`?q=`) |
+| `/api/steam/sync` | GET/POST | Sync Steam owned library + wishlist |
+| `/api/backlog` | POST | Backlog actions: `add`/`remove`/`up`/`down`/`complete`/`uncomplete`/`reorder` |
+| `/api/sync` | GET/POST | Run the weekly sync incl. Steam (guarded by `CRON_SECRET`) |
 
 ---
 
@@ -101,6 +113,7 @@ Key columns:
 |---|---|---|
 | `POSTGRES_URL` / `DATABASE_URL` | ✅ | Postgres connection (Neon integration may prefix it, e.g. `SGT_POSTGRES_URL` — auto‑detected) |
 | `IGDB_CLIENT_ID` / `IGDB_CLIENT_SECRET` | ✅ | Twitch app creds for IGDB (games, scores, covers) |
+| `STEAM_API_KEY` / `STEAM_ID` | for Steam | Steam Web API key + your SteamID64 (owned library + wishlist) |
 | `CRON_SECRET` | ✅ | Protects `/api/sync`; sent automatically by Vercel Cron |
 | `BRAVE_API_KEY` | optional | Enables web search for format detection |
 | `LLM_API_KEY` | optional | Enables the LLM snippet reader |
@@ -130,6 +143,7 @@ npm run dev
 | `npm run db:seed` | Seed from `data/games-data.json` (upserts by title) |
 | `npx tsx scripts/backfill-formats.ts` | Detect physical format for unconfirmed games |
 | `npx tsx scripts/backfill-scores.ts` | Backfill IGDB critic ratings |
+| `npx tsx scripts/backfill-igdb-urls.ts` | Backfill IGDB page URLs |
 | `npx tsx scripts/fix-covers.ts [--apply]` | Replace local covers with IGDB art |
 | `npx tsx scripts/sync-once.ts` | Run the discovery sync locally |
 
@@ -148,14 +162,30 @@ npm run dev
 
 ---
 
+## Libraries, tabs & the backlog planner
+
+- **Tabs** (`All / Switch / Switch 2 / Steam / Planner`) scope the stats, filters,
+  search, and views to one library at a time — or everything under **All**.
+- **Steam games** are digital, so the cart‑format UI is hidden; they show playtime
+  and link to their Steam store page.
+- **Planner** is a prioritized backlog across every library. Add games with the
+  **★ Backlog** button; on the Planner tab, **drag rows** (or use ▲/▼) to reorder,
+  mark **✓ Done**, and watch the progress bar.
+
+## Steam sync
+
+One‑way **Steam → app**. Owned games become `owned`; wishlist items become
+`wanted`. It never deletes games or overwrites your manual edits. Triggered by the
+**Sync Steam** button (Steam tab) and folded into the weekly cron. Requires
+`STEAM_API_KEY` + `STEAM_ID`, and a **public** Steam profile (profile + game
+details + wishlist).
+
 ## Adding games
 
-- **Automatically:** the weekly sync discovers new **Switch 2 / cross-gen** releases
-  above a popularity threshold.
-- **Manually:** click **"+ Add game"** and **search IGDB right in the app** — type
-  a title, then click **Add** on the result you want. It's fetched and added with
-  cover art, score, release info, and best-effort format detection. This is how you
-  add specific **Switch 1** titles without importing the whole Switch 1 catalog.
+- **Automatically:** the weekly sync discovers new **Switch 2 / cross‑gen** releases
+  above a popularity threshold, and re‑syncs your Steam library.
+- **Manually:** click **"+ Add game"**, choose **Nintendo** or **Steam**, search,
+  and click **Add**. Nintendo adds run format detection; Steam adds go in as wanted.
   (Pasting an IGDB link still works too.)
 
 ## Notes & caveats
@@ -164,5 +194,5 @@ npm run dev
   which is why detection is best‑effort and confirmable. IGDB's `igdb_rating` is a
   critic aggregate (its own number), not a specific Metacritic/OpenCritic value.
 - New games are imported only above a popularity threshold to avoid shovelware.
-- The weekly refresh never overwrites your personal fields (owned/wanted, format)
-  or an existing cover.
+- The weekly refresh never overwrites your personal fields (owned/wanted, format,
+  backlog) or an existing cover. Steam sync is one‑way and non‑destructive.
