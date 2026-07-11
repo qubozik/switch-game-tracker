@@ -40,6 +40,18 @@ function playtimeLabel(mins: number | null): string | null {
   return h < 1 ? `${mins}m played` : `${h.toFixed(h < 10 ? 1 : 0)}h played`;
 }
 
+// If a Steam capsule image 404s (older games lack library_600x900), fall back to
+// the header image, which always exists.
+function onCoverError(
+  e: { currentTarget: HTMLImageElement },
+  steamAppId: number | null,
+) {
+  const img = e.currentTarget;
+  if (img.dataset.fb || !steamAppId) return;
+  img.dataset.fb = "1";
+  img.src = `https://cdn.cloudflare.steamstatic.com/steam/apps/${steamAppId}/header.jpg`;
+}
+
 export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
   const [games, setGames] = useState<Game[]>(initialGames);
   const [tab, setTab] = useState<Tab>("All");
@@ -556,7 +568,7 @@ export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
                       <li key={r.key} className="flex items-center gap-3 rounded-md p-2 hover:bg-zinc-800/50">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         {r.coverUrl ? (
-                          <img src={r.coverUrl} alt="" className="h-12 w-9 object-cover rounded shrink-0" />
+                          <img src={r.coverUrl} alt="" onError={(e) => onCoverError(e, r.payload.steamAppId ?? null)} className="h-12 w-9 object-cover rounded shrink-0" />
                         ) : (
                           <div className="h-12 w-9 rounded bg-zinc-800 shrink-0" />
                         )}
@@ -722,10 +734,10 @@ function GameCard({
         {g.coverImageUrl ? (
           link ? (
             <a href={link} target="_blank" rel="noopener noreferrer" className="block h-full w-full" title="View store / IGDB page">
-              <img src={g.coverImageUrl} alt={g.title} loading="lazy" className="h-full w-full object-cover" />
+              <img src={g.coverImageUrl} alt={g.title} loading="lazy" onError={(e) => onCoverError(e, g.steamAppId)} className="h-full w-full object-cover" />
             </a>
           ) : (
-            <img src={g.coverImageUrl} alt={g.title} loading="lazy" className="h-full w-full object-cover" />
+            <img src={g.coverImageUrl} alt={g.title} loading="lazy" onError={(e) => onCoverError(e, g.steamAppId)} className="h-full w-full object-cover" />
           )
         ) : (
           <div className="h-full w-full grid place-items-center text-zinc-600 text-sm">No cover</div>
@@ -845,10 +857,10 @@ function GameRow({
         {g.coverImageUrl ? (
           link ? (
             <a href={link} target="_blank" rel="noopener noreferrer" title="View store / IGDB page">
-              <img src={g.coverImageUrl} alt="" loading="lazy" className="h-10 w-8 object-cover rounded" />
+              <img src={g.coverImageUrl} alt="" loading="lazy" onError={(e) => onCoverError(e, g.steamAppId)} className="h-10 w-8 object-cover rounded" />
             </a>
           ) : (
-            <img src={g.coverImageUrl} alt="" loading="lazy" className="h-10 w-8 object-cover rounded" />
+            <img src={g.coverImageUrl} alt="" loading="lazy" onError={(e) => onCoverError(e, g.steamAppId)} className="h-10 w-8 object-cover rounded" />
           )
         ) : (
           <div className="h-10 w-8 rounded bg-zinc-800" />
@@ -1012,7 +1024,7 @@ function PlannerRow({
       {!completedRow && <div className="w-6 text-center text-sm font-bold text-zinc-500">{index}</div>}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       {g.coverImageUrl ? (
-        <img src={g.coverImageUrl} alt="" className="h-12 w-9 object-cover rounded shrink-0" />
+        <img src={g.coverImageUrl} alt="" onError={(e) => onCoverError(e, g.steamAppId)} className="h-12 w-9 object-cover rounded shrink-0" />
       ) : (
         <div className="h-12 w-9 rounded bg-zinc-800 shrink-0" />
       )}
