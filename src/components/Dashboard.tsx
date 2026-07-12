@@ -366,7 +366,7 @@ export default function Dashboard({ initialGames }: { initialGames: Game[] }) {
               N
             </div>
             <div>
-              <h1 className="text-lg font-bold leading-tight">Game Tracker</h1>
+              <h1 className="text-lg font-bold leading-tight">Games Dash</h1>
               <p className="text-xs text-zinc-400">
                 Own it, want it, plan your backlog.
               </p>

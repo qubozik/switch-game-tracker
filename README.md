@@ -1,4 +1,4 @@
-# Game Tracker
+# Games Dash
 
 A personal, self-hosted tracker for **Nintendo Switch / Switch 2** and **Steam**
 games. Mark what you **own** and **want**, know each Nintendo physical release's

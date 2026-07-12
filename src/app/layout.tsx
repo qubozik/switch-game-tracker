@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Game Tracker",
+  title: "Games Dash",
   description:
-    "Track your Nintendo Switch and Steam games — owned, wanted, cart type, and a backlog completion planner.",
+    "Track your Nintendo Switch and Steam games — owned, wanted, cart type, prices, and a backlog completion planner.",
 };
 
 export default function RootLayout({
