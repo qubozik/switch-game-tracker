@@ -18,6 +18,9 @@ kept up‑to‑date automatically every week.
 - **Owned / Wanted tracking** per game, saved to the database (not browser cache).
 - **Steam sync** — your owned library (→ owned) and wishlist (→ wanted), one‑way,
   with playtime and store links.
+- **Steam prices & sales** — a daily price refresh with **on‑sale badges** (discount %
+  and the original price struck through), an **On sale** stat card and filter, and a
+  **Discount %** sort to jump straight to current deals.
 - **Physical format** tracking (Nintendo) — `Full Cart` · `Key Card` · `Digital Only`
   · `Unknown` — editable, with a badge showing how it was determined.
 - **Automatic cart‑type detection** for new games (see [Detection pipeline](#detection-pipeline)).
@@ -27,7 +30,9 @@ kept up‑to‑date automatically every week.
   to the IGDB / Steam store page.
 - **Weekly auto‑sync** (Sundays, 5 AM Eastern): discovers new Switch/Switch 2
   releases, refreshes scores/dates/covers, and re‑syncs Steam.
-- **Search, filter and sort**; **clickable stat cards** as one‑click filters.
+- **Search, filter and sort** (including sorting Steam games by **discount**);
+  **clickable stat cards** (Total, Owned, Wanted, Released, Upcoming, Needs review,
+  **On sale**) as one‑click filters.
 - **Grid and Table views.**
 - **Hide** games you'll never want (excluded by default, with a "Show hidden" toggle).
 - **Manually add any game** via built-in **IGDB or Steam search** (or an IGDB link).
@@ -39,10 +44,11 @@ kept up‑to‑date automatically every week.
 
 - **Next.js 16** (App Router, TypeScript, React 19)
 - **Vercel Postgres (Neon)** with **Drizzle ORM**
-- **Vercel Cron** for the weekly sync
+- **Vercel Cron** for the weekly catalog sync and the daily Steam price refresh
 - **Next.js middleware** for password (Basic Auth)
 - External data: **IGDB** (via Twitch app), **Steam Web API** + storefront,
-  **Brave Search API**, and an optional **OpenAI‑compatible LLM** (e.g. Ollama Cloud)
+  **Brave Search API**, and an optional **OpenAI‑compatible LLM** — this deployment
+  uses **Vercel AI Gateway** (`openai/gpt-5-nano`)
 
 ---
 
@@ -57,7 +63,9 @@ you to confirm. For each new game:
 2. **Brave Search** retrieves web results for the title.
 3. **LLM snippet reader** (if configured) reads those results and classifies the
    format (handles "is **not** a game‑key card" vs. generic mentions). Falls back
-   to a regex heuristic if no LLM is configured.
+   to a regex heuristic if no LLM is configured. The request prefers JSON‑object
+   mode but automatically retries without it for models that don't support it
+   (e.g. `gpt-5-nano`).
 4. Confidence gating: **high** → applied and confirmed; **medium** → applied but
    flagged for review; otherwise left **Unknown / needs review**.
 
@@ -83,6 +91,9 @@ Key columns:
 | `metacritic_score`, `opencritic_score`, `igdb_rating` | review scores |
 | `cover_image_url` | cover art (IGDB or Steam) |
 | `playtime_minutes` | from Steam |
+| `price_usd` | list price (USD), where known |
+| `steam_price_cents`, `steam_initial_cents`, `steam_discount_pct` | current Steam price, original price, and discount % — refreshed daily |
+| `price_updated_at` | last Steam price refresh |
 | `status` | `owned` · `wanted` · `null` |
 | `hidden` | excluded from the default view |
 | `backlog_order` | position in the backlog planner (`null` = not in backlog) |
@@ -102,6 +113,7 @@ Key columns:
 | `/api/igdb/search` | GET | Search IGDB for Switch/Switch 2 games (`?q=`) |
 | `/api/steam/search` | GET | Search Steam games (`?q=`) |
 | `/api/steam/sync` | GET/POST | Sync Steam owned library + wishlist |
+| `/api/steam/prices` | GET/POST | Refresh Steam prices + sale info (daily cron; guarded by `CRON_SECRET`) |
 | `/api/backlog` | POST | Backlog actions: `add`/`remove`/`up`/`down`/`complete`/`uncomplete`/`reorder` |
 | `/api/sync` | GET/POST | Run the weekly sync incl. Steam (guarded by `CRON_SECRET`) |
 
@@ -117,8 +129,8 @@ Key columns:
 | `CRON_SECRET` | ✅ | Protects `/api/sync`; sent automatically by Vercel Cron |
 | `BRAVE_API_KEY` | optional | Enables web search for format detection |
 | `LLM_API_KEY` | optional | Enables the LLM snippet reader |
-| `LLM_BASE_URL` | optional | OpenAI‑compatible base URL (default `https://api.openai.com/v1`; Ollama Cloud: `https://ollama.com/v1`) |
-| `LLM_MODEL` | optional | Model name (default `gpt-4o-mini`) |
+| `LLM_BASE_URL` | optional | OpenAI‑compatible base URL (code default `https://api.openai.com/v1`; this deployment uses Vercel AI Gateway: `https://ai-gateway.vercel.sh/v1`) |
+| `LLM_MODEL` | optional | Model name (code default `gpt-4o-mini`; this deployment uses `openai/gpt-5-nano`) |
 | `APP_PASSWORD` | optional | Shared password gate for the whole site/API; unset = open |
 | `SYNC_MAX_FORMAT_LOOKUPS` | optional | Max Brave/LLM lookups per sync run (default 15) |
 | `SYNC_MIN_HYPES` / `SYNC_MIN_RATINGS` | optional | Popularity thresholds for importing new games (default 5 / 8) |
@@ -157,8 +169,8 @@ npm run dev
    optionally `BRAVE_API_KEY`, `LLM_*`, and `APP_PASSWORD`.
 4. Push the schema and seed once (from a machine with the DB URL set):
    `npm run db:push && npm run db:seed`.
-5. The cron in `vercel.json` runs `/api/sync` every Sunday at **05:00 America/New_York**
-   (`0 10 * * 0` UTC).
+5. The crons in `vercel.json` run `/api/sync` every Sunday at **05:00 America/New_York**
+   (`0 10 * * 0` UTC) and `/api/steam/prices` **daily at 10:00 Eastern** (`0 15 * * *` UTC).
 
 ---
 
@@ -179,6 +191,11 @@ One‑way **Steam → app**. Owned games become `owned`; wishlist items become
 **Sync Steam** button (Steam tab) and folded into the weekly cron. Requires
 `STEAM_API_KEY` + `STEAM_ID`, and a **public** Steam profile (profile + game
 details + wishlist).
+
+Steam **prices and sales** refresh automatically once a day via `/api/steam/prices`
+(and are also folded into the weekly sync). On‑sale titles show a discount badge with
+the struck‑through original price, and the **On sale** stat card / **Discount %** sort
+surface the current deals.
 
 ## Adding games
 
