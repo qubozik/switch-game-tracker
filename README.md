@@ -31,7 +31,7 @@ kept up‑to‑date automatically every week.
 - **Grid and Table views.**
 - **Hide** games you'll never want (excluded by default, with a "Show hidden" toggle).
 - **Manually add any game** via built-in **IGDB or Steam search** (or an IGDB link).
-- Access is controlled by **Vercel Deployment Protection** (project-level).
+- **Password protection** for the whole site and API (single shared password via `APP_PASSWORD`).
 
 ---
 
@@ -40,6 +40,7 @@ kept up‑to‑date automatically every week.
 - **Next.js 16** (App Router, TypeScript, React 19)
 - **Vercel Postgres (Neon)** with **Drizzle ORM**
 - **Vercel Cron** for the weekly sync
+- **Next.js middleware** for password (Basic Auth)
 - External data: **IGDB** (via Twitch app), **Steam Web API** + storefront,
   **Brave Search API**, and an optional **OpenAI‑compatible LLM** (e.g. Ollama Cloud)
 
@@ -118,12 +119,9 @@ Key columns:
 | `LLM_API_KEY` | optional | Enables the LLM snippet reader |
 | `LLM_BASE_URL` | optional | OpenAI‑compatible base URL (default `https://api.openai.com/v1`; Ollama Cloud: `https://ollama.com/v1`) |
 | `LLM_MODEL` | optional | Model name (default `gpt-4o-mini`) |
-| `APP_PASSWORD` | deprecated | Former in-app password; access now via Vercel Deployment Protection |
+| `APP_PASSWORD` | optional | Shared password gate for the whole site/API; unset = open |
 | `SYNC_MAX_FORMAT_LOOKUPS` | optional | Max Brave/LLM lookups per sync run (default 15) |
 | `SYNC_MIN_HYPES` / `SYNC_MIN_RATINGS` | optional | Popularity thresholds for importing new games (default 5 / 8) |
-
-> Access control is handled by **Vercel Deployment Protection** (Project → Settings →
-> Deployment Protection), not an in-app password.
 
 ---
 
